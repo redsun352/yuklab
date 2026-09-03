@@ -2,6 +2,8 @@ import Fastify from "fastify";
 import { userRoutes } from "./routes/users";
 import { authRoutes } from "./modules/auth/routes";
 import { orderRoutes } from "./modules/orders/routes";
+import { offerRoutes } from "./modules/offers/routes";
+import { matchingRoutes } from "./modules/matching/routes";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -15,6 +17,8 @@ export function buildApp() {
   app.register(authRoutes);
   app.register(userRoutes);
   app.register(orderRoutes);
+  app.register(offerRoutes);
+  app.register(matchingRoutes);
 
   return app;
 }
