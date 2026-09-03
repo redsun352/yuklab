@@ -6,14 +6,12 @@ on:
   pull_request:
     branches: [main]
 
-# Do not spend runners on superseded commits from the same branch/PR.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-# CI only needs to read repository contents.
-permissions:
-  contents: read
 
 jobs:
   quality:
@@ -21,18 +19,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
-
-      - name: Setup pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.15.0 --activate
-          pnpm --version
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
