@@ -4,6 +4,9 @@ import { requireAuth, requireRole } from "../auth/guard";
 import { getDriverLocation, setDriverLocation } from "./state";
 import { publishOrderLocation } from "./realtime";
 
+const MAX_LOCATION_AGE_MS = 5 * 60 * 1000;
+const MAX_LOCATION_FUTURE_MS = 60 * 1000;
+
 export async function trackingRoutes(app: FastifyInstance) {
   app.post<{
     Body: { lat: number; lng: number; heading?: number; speedKph?: number; accuracyM?: number; timestamp?: string; orderId?: string };
@@ -12,12 +15,14 @@ export async function trackingRoutes(app: FastifyInstance) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return reply.code(400).send({ error: "INVALID_LOCATION" });
     if (heading !== undefined && (!Number.isFinite(heading) || heading < 0 || heading >= 360)) return reply.code(400).send({ error: "INVALID_HEADING" });
     if (speedKph !== undefined && (!Number.isFinite(speedKph) || speedKph < 0 || speedKph > 500)) return reply.code(400).send({ error: "INVALID_SPEED" });
-    if (accuracyM !== undefined && (!Number.isFinite(accuracyM) || accuracyM < 0)) return reply.code(400).send({ error: "INVALID_ACCURACY" });
+    if (accuracyM !== undefined && (!Number.isFinite(accuracyM) || accuracyM < 0 || accuracyM > 10000)) return reply.code(400).send({ error: "INVALID_ACCURACY" });
     const time = timestamp ? new Date(timestamp) : new Date();
     if (Number.isNaN(time.getTime())) return reply.code(400).send({ error: "INVALID_TIMESTAMP" });
+    const now = Date.now();
+    if (time.getTime() < now - MAX_LOCATION_AGE_MS || time.getTime() > now + MAX_LOCATION_FUTURE_MS) return reply.code(400).send({ error: "TIMESTAMP_OUT_OF_RANGE" });
 
     if (orderId) {
-      const order = await prisma.order.findFirst({ where: { id: orderId, assignedDriverId: request.user!.id }, select: { id: true } });
+      const order = await prisma.order.findFirst({ where: { id: orderId, assignedDriverId: request.user!.id, status: { notIn: ["CANCELLED", "EXPIRED", "FAILED", "COMPLETED", "DISPUTED"] } }, select: { id: true } });
       if (!order) return reply.code(403).send({ error: "ORDER_NOT_ASSIGNED" });
     }
 
