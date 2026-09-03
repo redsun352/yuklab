@@ -7,13 +7,8 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
   if (response.status === 401 && retryOn401 && typeof window !== "undefined") {
     const refreshToken = window.localStorage.getItem("yuklab_refresh_token");
     if (refreshToken && path !== "/v1/auth/refresh") {
-      try {
-        const refreshed = await refresh(refreshToken);
-        window.localStorage.setItem("yuklab_access_token", refreshed.accessToken);
-        window.localStorage.setItem("yuklab_refresh_token", refreshed.refreshToken);
-        const headers = new Headers(fetchInit.headers); headers.set("authorization", `Bearer ${refreshed.accessToken}`);
-        return request<T>(path, { ...fetchInit, headers, retryOn401: false });
-      } catch { window.localStorage.removeItem("yuklab_access_token"); window.localStorage.removeItem("yuklab_refresh_token"); window.localStorage.removeItem("yuklab_user_role"); }
+      try { const refreshed = await refresh(refreshToken); window.localStorage.setItem("yuklab_access_token", refreshed.accessToken); window.localStorage.setItem("yuklab_refresh_token", refreshed.refreshToken); const headers = new Headers(fetchInit.headers); headers.set("authorization", `Bearer ${refreshed.accessToken}`); return request<T>(path, { ...fetchInit, headers, retryOn401: false }); }
+      catch { window.localStorage.removeItem("yuklab_access_token"); window.localStorage.removeItem("yuklab_refresh_token"); window.localStorage.removeItem("yuklab_user_role"); }
     }
   }
   if (!response.ok) { const body = (await response.json().catch(() => ({}))) as ApiError; throw new Error(body.error ?? `REQUEST_FAILED_${response.status}`); }
@@ -26,6 +21,7 @@ export type OrderRequirements = { weightKg?: number; volumeM3?: number; vehicleT
 export type Order = { id: string; serviceType: string; status: string; pickupAddress: string; deliveryAddress?: string | null; pickupLat?: string | null; pickupLng?: string | null; deliveryLat?: string | null; deliveryLng?: string | null; scheduledAt?: string | null; budgetMinor?: string | null; currency: string; urgency?: number; payload?: OrderRequirements | null; createdAt: string };
 export type Offer = { id: string; orderId: string; providerId: string; amountMinor: string; currency: string; etaMinutes?: number | null; note?: string | null; status: string; expiresAt?: string | null; createdAt: string; provider?: { id: string; firstName: string; lastName: string; role: string }; order?: Pick<Order, "id" | "serviceType" | "status" | "pickupAddress" | "deliveryAddress" | "payload"> };
 export type Vehicle = { id: string; ownerId: string; type: string; subtype?: string | null; plateNumber?: string | null; capacityKg?: string | null; volumeM3?: string | null; refrigerated: boolean; active: boolean; createdAt: string; updatedAt: string };
+export type Match = { providerId: string; score: number; distanceKm: number; rating: number; reliabilityScore: number; etaMinutes: number | null; vehicleId: string | null; vehicleType: string | null; vehicleSubtype: string | null; capacityKg: number | null; volumeM3: number | null; refrigerated: boolean };
 export async function login(identifier: string, password: string) { const result = await request<LoginResponse>("/v1/auth/login", { method: "POST", body: JSON.stringify({ identifier, password }) }); if (typeof window !== "undefined") { window.localStorage.setItem("yuklab_access_token", result.accessToken); window.localStorage.setItem("yuklab_refresh_token", result.refreshToken); window.localStorage.setItem("yuklab_user_role", result.user.role); } return result; }
 export async function register(input: { email: string; password: string; firstName: string; lastName: string }) { return request<{ user: AuthUser }>("/v1/auth/register", { method: "POST", body: JSON.stringify(input) }); }
 export async function refresh(refreshToken: string) { return request<{ accessToken: string; refreshToken: string; expiresIn: number }>("/v1/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }), retryOn401: false }); }
@@ -35,6 +31,7 @@ function auth(accessToken: string): RequestInit { return { headers: { authorizat
 export async function createOrder(accessToken: string, input: { serviceType: string; pickupAddress: string; deliveryAddress?: string; pickupLat?: number; pickupLng?: number; deliveryLat?: number; deliveryLng?: number; scheduledAt?: string; budgetMinor?: number; currency?: string; urgency?: number; payload?: OrderRequirements }) { return request<{ order: Order }>("/v1/orders", { ...auth(accessToken), method: "POST", body: JSON.stringify(input) }); }
 export async function listOrders(accessToken: string) { return request<{ orders: Order[] }>("/v1/orders", auth(accessToken)); }
 export async function listOrderOffers(accessToken: string, orderId: string) { return request<{ offers: Offer[] }>(`/v1/orders/${orderId}/offers`, auth(accessToken)); }
+export async function listOrderMatches(accessToken: string, orderId: string) { return request<{ matches: Match[] }>(`/v1/orders/${orderId}/matches`, auth(accessToken)); }
 export async function acceptOffer(accessToken: string, orderId: string, offerId: string) { return request<{ order: Order; offer: Offer }>(`/v1/orders/${orderId}/offers/${offerId}/accept`, { ...auth(accessToken), method: "POST" }); }
 export async function listProviderOrders(accessToken: string) { return request<{ orders: Order[] }>("/v1/provider/orders", auth(accessToken)); }
 export async function listProviderOffers(accessToken: string) { return request<{ offers: Offer[] }>("/v1/provider/offers", auth(accessToken)); }
