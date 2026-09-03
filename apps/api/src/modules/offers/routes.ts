@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
 
@@ -72,7 +73,7 @@ export async function offerRoutes(app: FastifyInstance) {
       if (!offer) return reply.code(404).send({ error: "OFFER_NOT_FOUND" });
       if (offer.expiresAt && offer.expiresAt <= new Date()) return reply.code(410).send({ error: "OFFER_EXPIRED" });
 
-      const accepted = await prisma.$transaction(async (tx) => {
+      const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         await tx.offer.updateMany({ where: { orderId: order.id, status: "PENDING" }, data: { status: "REJECTED" } });
         const selected = await tx.offer.update({ where: { id: offer.id }, data: { status: "ACCEPTED" } });
         const updatedOrder = await tx.order.update({
