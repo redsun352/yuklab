@@ -12,6 +12,9 @@ export interface AuthService {
 
 export class UnconfiguredAuthService implements AuthService {
   async authenticate(_email: string, _password: string): Promise<AuthUser> {
+    void _email;
+    void _password;
+
     throw new AuthError(
       "Authentication provider is not configured.",
       "UNAUTHORIZED",
