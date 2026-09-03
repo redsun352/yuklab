@@ -71,7 +71,7 @@ export async function findNearbyDriverIds(
     if (stale.length > 0) {
       await redis!.multi().zrem(seenKey, ...stale).zrem(geoKey, ...stale).exec();
     }
-    return await redis!.geosearch(
+    const nearby = await redis!.geosearch(
       geoKey,
       "FROMLONLAT",
       lng,
@@ -79,6 +79,7 @@ export async function findNearbyDriverIds(
       radiusKm,
       "km",
     );
+    return nearby.map(String);
   } catch {
     return [];
   }
