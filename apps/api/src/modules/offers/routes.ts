@@ -3,6 +3,10 @@ import type { Prisma } from "@yuklab/database";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
 
+const CURRENCY_RE = /^[A-Z]{3}$/;
+const MAX_ETA_MINUTES = 7 * 24 * 60;
+const MAX_NOTE_LENGTH = 1000;
+
 function serializeBigInt<T>(value: T): T {
   return JSON.parse(
     JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v)),
@@ -30,6 +34,12 @@ export async function offerRoutes(app: FastifyInstance) {
 
       let amountMinor: bigint;
       try {
+        if (
+          req.body.amountMinor === undefined ||
+          (typeof req.body.amountMinor === "number" && !Number.isSafeInteger(req.body.amountMinor))
+        ) {
+          throw new Error("INVALID_AMOUNT");
+        }
         amountMinor = BigInt(req.body.amountMinor);
       } catch {
         return reply.code(400).send({ error: "INVALID_AMOUNT" });
@@ -38,13 +48,35 @@ export async function offerRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: "INVALID_AMOUNT" });
       }
 
-      const etaMinutes =
-        req.body.etaMinutes === undefined
-          ? undefined
-          : Math.max(1, Math.trunc(req.body.etaMinutes));
+      if (req.body.currency !== undefined && !CURRENCY_RE.test(req.body.currency)) {
+        return reply.code(400).send({ error: "INVALID_CURRENCY" });
+      }
 
-      if (req.body.expiresAt && Number.isNaN(Date.parse(req.body.expiresAt))) {
-        return reply.code(400).send({ error: "INVALID_EXPIRY" });
+      let etaMinutes: number | undefined;
+      if (req.body.etaMinutes !== undefined) {
+        if (
+          !Number.isFinite(req.body.etaMinutes) ||
+          !Number.isInteger(req.body.etaMinutes) ||
+          req.body.etaMinutes < 1 ||
+          req.body.etaMinutes > MAX_ETA_MINUTES
+        ) {
+          return reply.code(400).send({ error: "INVALID_ETA" });
+        }
+        etaMinutes = req.body.etaMinutes;
+      }
+
+      const note = req.body.note?.trim();
+      if (note && note.length > MAX_NOTE_LENGTH) {
+        return reply.code(400).send({ error: "NOTE_TOO_LONG" });
+      }
+
+      let expiresAt: Date | undefined;
+      if (req.body.expiresAt) {
+        const parsed = new Date(req.body.expiresAt);
+        if (Number.isNaN(parsed.getTime()) || parsed <= new Date()) {
+          return reply.code(400).send({ error: "INVALID_EXPIRY" });
+        }
+        expiresAt = parsed;
       }
 
       const existing = await prisma.offer.findFirst({
@@ -66,8 +98,8 @@ export async function offerRoutes(app: FastifyInstance) {
             amountMinor,
             currency: req.body.currency ?? order.currency,
             etaMinutes,
-            note: req.body.note?.trim(),
-            expiresAt: req.body.expiresAt ? new Date(req.body.expiresAt) : undefined,
+            note,
+            expiresAt,
           },
         });
 
@@ -132,7 +164,6 @@ export async function offerRoutes(app: FastifyInstance) {
 
       try {
         const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          // Claim the order atomically so two simultaneous accepts cannot both win.
           const claimed = await tx.order.updateMany({
             where: {
               id: order.id,
