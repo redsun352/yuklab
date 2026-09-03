@@ -4,6 +4,7 @@ import { authRoutes } from "./modules/auth/routes";
 import { orderRoutes } from "./modules/orders/routes";
 import { offerRoutes } from "./modules/offers/routes";
 import { matchingRoutes } from "./modules/matching/routes";
+import { trackingRoutes } from "./modules/tracking/routes";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -19,6 +20,7 @@ export function buildApp() {
   app.register(orderRoutes);
   app.register(offerRoutes);
   app.register(matchingRoutes);
+  app.register(trackingRoutes);
 
   return app;
 }
