@@ -4,6 +4,7 @@ import websocket from "@fastify/websocket";
 import { userRoutes } from "./routes/users";
 import { authRoutes } from "./modules/auth/routes";
 import { orderRoutes } from "./modules/orders/routes";
+import { providerOrderRoutes } from "./modules/orders/provider-routes";
 import { offerRoutes } from "./modules/offers/routes";
 import { matchingRoutes } from "./modules/matching/routes";
 import { trackingRoutes } from "./modules/tracking/routes";
@@ -26,6 +27,7 @@ export function buildApp() {
   app.register(authRoutes);
   app.register(userRoutes);
   app.register(orderRoutes);
+  app.register(providerOrderRoutes);
   app.register(offerRoutes);
   app.register(matchingRoutes);
   app.register(trackingRoutes);
