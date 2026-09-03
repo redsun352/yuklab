@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@yuklab/database";
+import { findNearbyDriverIds, getDriverLocation } from "../tracking/state";
 
 type MatchCandidate = {
   providerId: string;
@@ -6,7 +7,7 @@ type MatchCandidate = {
   distanceKm: number;
   rating: number;
   reliabilityScore: number;
-  etaMinutes: number;
+  etaMinutes: number | null;
 };
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -21,35 +22,46 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
 
 export async function findMatches(prisma: PrismaClient, orderId: string): Promise<MatchCandidate[]> {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order) return [];
-  if (order.pickupLat === null || order.pickupLng === null) return [];
+  if (!order || order.pickupLat === null || order.pickupLng === null) return [];
 
   const pickupLat = Number(order.pickupLat);
   const pickupLng = Number(order.pickupLng);
+  const maxRadiusKm = Number(process.env.MATCHING_MAX_RADIUS_KM ?? 50);
+  const nearbyIds = await findNearbyDriverIds(pickupLat, pickupLng, maxRadiusKm);
+  if (nearbyIds.length === 0) return [];
+
   const providers = await prisma.driverProfile.findMany({
-    where: { isOnline: true, isAvailable: true, user: { status: "ACTIVE" } },
+    where: {
+      userId: { in: nearbyIds },
+      isOnline: true,
+      isAvailable: true,
+      user: { status: "ACTIVE" },
+    },
     include: { user: { select: { id: true } } },
   });
 
-  return providers
-    .map((provider) => {
-      // Driver GPS positions will become the source of truth once TrackingState is introduced.
-      // For now, keep the provider eligible and let downstream availability/ETA enrich this score.
-      const distanceKm = Number(provider.serviceRadiusKm);
-      const distanceScore = Math.max(0, 40 - Math.min(distanceKm, 40));
-      const ratingScore = Number(provider.rating) * 6;
-      const reliabilityScore = Number(provider.reliabilityScore) * 0.2;
-      const availabilityScore = provider.isAvailable ? 20 : 0;
-      const score = distanceScore + ratingScore + reliabilityScore + availabilityScore;
-      const etaMinutes = Math.max(5, Math.round(distanceKm * 3));
-      return {
-        providerId: provider.user.id,
-        score,
-        distanceKm,
-        rating: Number(provider.rating),
-        reliabilityScore: Number(provider.reliabilityScore),
-        etaMinutes,
-      };
-    })
-    .sort((a, b) => b.score - a.score);
+  const candidates: MatchCandidate[] = [];
+  for (const provider of providers) {
+    const location = await getDriverLocation(provider.user.id);
+    if (!location) continue;
+
+    const distanceKm = haversineKm(pickupLat, pickupLng, location.lat, location.lng);
+    const distanceScore = Math.max(0, 40 - Math.min(distanceKm, 40));
+    const ratingScore = Number(provider.rating) * 6;
+    const reliabilityScore = Number(provider.reliabilityScore) * 0.2;
+    const availabilityScore = 20;
+    const score = distanceScore + ratingScore + reliabilityScore + availabilityScore;
+
+    candidates.push({
+      providerId: provider.user.id,
+      score,
+      distanceKm,
+      rating: Number(provider.rating),
+      reliabilityScore: Number(provider.reliabilityScore),
+      // ETA requires a routing provider; never fabricate road ETA from straight-line distance.
+      etaMinutes: null,
+    });
+  }
+
+  return candidates.sort((a, b) => b.score - a.score);
 }
