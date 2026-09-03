@@ -7,6 +7,7 @@ import { offerRoutes } from "./modules/offers/routes";
 import { matchingRoutes } from "./modules/matching/routes";
 import { trackingRoutes } from "./modules/tracking/routes";
 import { trackingRealtimeRoutes } from "./modules/tracking/realtime";
+import { trackingWsTokenRoutes } from "./modules/tracking/ws-token";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -19,6 +20,7 @@ export function buildApp() {
   app.register(offerRoutes);
   app.register(matchingRoutes);
   app.register(trackingRoutes);
+  app.register(trackingWsTokenRoutes);
   app.register(trackingRealtimeRoutes);
 
   return app;
