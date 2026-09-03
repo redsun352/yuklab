@@ -21,6 +21,11 @@ function key(driverId: string): string {
   return `yuklab:tracking:driver:${driverId}`;
 }
 
+function isFresh(location: DriverLocation): boolean {
+  const timestampMs = Date.parse(location.timestamp);
+  return Number.isFinite(timestampMs) && timestampMs >= Date.now() - ttlSeconds * 1000;
+}
+
 async function ensureRedis(): Promise<boolean> {
   if (!redis) return false;
   if (redis.status === "ready") return true;
@@ -51,12 +56,21 @@ export async function getDriverLocation(driverId: string): Promise<DriverLocatio
   if (await ensureRedis()) {
     try {
       const value = await redis!.get(key(driverId));
-      if (value) return JSON.parse(value) as DriverLocation;
+      if (value) {
+        const location = JSON.parse(value) as DriverLocation;
+        if (isFresh(location)) return location;
+      }
     } catch {
       // Fall through to the local process cache.
     }
   }
-  return locations.get(driverId);
+
+  const location = locations.get(driverId);
+  if (!location || !isFresh(location)) {
+    if (location) locations.delete(driverId);
+    return undefined;
+  }
+  return location;
 }
 
 export async function findNearbyDriverIds(
@@ -64,23 +78,46 @@ export async function findNearbyDriverIds(
   lng: number,
   radiusKm: number,
 ): Promise<string[]> {
-  if (!(await ensureRedis())) return [];
-  try {
-    const cutoff = Date.now() - ttlSeconds * 1000;
-    const stale = await redis!.zrangebyscore(seenKey, 0, cutoff);
-    if (stale.length > 0) {
-      await redis!.multi().zrem(seenKey, ...stale).zrem(geoKey, ...stale).exec();
+  if (await ensureRedis()) {
+    try {
+      const cutoff = Date.now() - ttlSeconds * 1000;
+      const stale = await redis!.zrangebyscore(seenKey, 0, cutoff);
+      if (stale.length > 0) {
+        await redis!.multi().zrem(seenKey, ...stale).zrem(geoKey, ...stale).exec();
+      }
+      const nearby = await redis!.geosearch(
+        geoKey,
+        "FROMLONLAT",
+        lng,
+        lat,
+        radiusKm,
+        "km",
+      );
+      return nearby.map(String);
+    } catch {
+      // Fall through to the in-process location index.
     }
-    const nearby = await redis!.geosearch(
-      geoKey,
-      "FROMLONLAT",
-      lng,
-      lat,
-      radiusKm,
-      "km",
-    );
-    return nearby.map(String);
-  } catch {
-    return [];
   }
+
+  const nearby: Array<{ driverId: string; distanceKm: number }> = [];
+  for (const location of locations.values()) {
+    if (!isFresh(location)) {
+      locations.delete(location.driverId);
+      continue;
+    }
+
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const earthRadiusKm = 6371;
+    const dLat = toRad(location.lat - lat);
+    const dLng = toRad(location.lng - lng);
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(toRad(lat)) * Math.cos(toRad(location.lat)) * Math.sin(dLng / 2) ** 2;
+    const distanceKm = earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    if (distanceKm <= radiusKm) nearby.push({ driverId: location.driverId, distanceKm });
+  }
+
+  return nearby
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .map(({ driverId }) => driverId);
 }
