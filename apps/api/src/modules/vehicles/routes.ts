@@ -38,10 +38,14 @@ function validateVehicleBody(body: Record<string, unknown>) {
   const type = typeof body.type === "string" ? body.type.trim().toUpperCase() : "";
   if (!VEHICLE_TYPES.has(type)) return { error: "Invalid vehicle type" };
 
-  const subtype = body.subtype === undefined || body.subtype === null || body.subtype === ""
-    ? undefined
-    : typeof body.subtype === "string" ? body.subtype.trim().toUpperCase() : null;
-  if (subtype === null || subtype.length > 80) return { error: "Invalid vehicle subtype" };
+  const subtypeValue = body.subtype;
+  const subtype: string | undefined =
+    subtypeValue === undefined || subtypeValue === null || subtypeValue === ""
+      ? undefined
+      : typeof subtypeValue === "string"
+        ? subtypeValue.trim().toUpperCase()
+        : "__INVALID__";
+  if (subtype === "__INVALID__" || subtype.length > 80) return { error: "Invalid vehicle subtype" };
 
   const capacityKg = finiteNumber(body.capacityKg);
   if (body.capacityKg !== undefined && capacityKg === undefined) return { error: "Invalid capacityKg" };
@@ -54,10 +58,14 @@ function validateVehicleBody(body: Record<string, unknown>) {
   const refrigerated = body.refrigerated === undefined ? undefined : body.refrigerated;
   if (refrigerated !== undefined && typeof refrigerated !== "boolean") return { error: "Invalid refrigerated" };
 
-  const plateNumber = body.plateNumber === undefined || body.plateNumber === null || body.plateNumber === ""
-    ? undefined
-    : typeof body.plateNumber === "string" ? body.plateNumber.trim().toUpperCase() : null;
-  if (plateNumber === null || (plateNumber && (plateNumber.length < 2 || plateNumber.length > 20))) {
+  const plateValue = body.plateNumber;
+  const plateNumber: string | undefined =
+    plateValue === undefined || plateValue === null || plateValue === ""
+      ? undefined
+      : typeof plateValue === "string"
+        ? plateValue.trim().toUpperCase()
+        : "__INVALID__";
+  if (plateNumber === "__INVALID__" || (plateNumber && (plateNumber.length < 2 || plateNumber.length > 20))) {
     return { error: "Invalid plateNumber" };
   }
 
