@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../../lib/prisma";
+import { requireAuth } from "./guard";
 import { createRefreshToken, hashPassword, hashToken, verifyPassword } from "./service";
 
 const ACCESS_TOKEN_TTL = "15m";
@@ -32,32 +33,23 @@ export async function authRoutes(app: FastifyInstance) {
     const firstName = request.body.firstName?.trim();
     const lastName = request.body.lastName?.trim();
 
-    if ((!email && !phone) || !firstName || !lastName || request.body.password.length < 8) {
-      return reply.code(400).send({ error: "INVALID_INPUT" });
-    }
-
+    if ((!email && !phone) || !firstName || !lastName || request.body.password.length < 8) return reply.code(400).send({ error: "INVALID_INPUT" });
     const existing = await prisma.user.findFirst({ where: { OR: [email ? { email } : undefined, phone ? { phone } : undefined].filter(Boolean) as Array<{ email?: string; phone?: string }> } });
     if (existing) return reply.code(409).send({ error: "ACCOUNT_EXISTS" });
 
-    const user = await prisma.user.create({
-      data: { email, phone, firstName, lastName, preferredLanguage: request.body.preferredLanguage ?? "tr-TR", passwordHash: await hashPassword(request.body.password), status: "ACTIVE" },
-    });
-
+    const user = await prisma.user.create({ data: { email, phone, firstName, lastName, preferredLanguage: request.body.preferredLanguage ?? "tr-TR", passwordHash: await hashPassword(request.body.password), status: "ACTIVE" } });
     return reply.code(201).send({ user: publicUser(user) });
   });
 
   app.post<{ Body: { identifier: string; password: string } }>("/v1/auth/login", async (request, reply) => {
     const identifier = request.body.identifier.trim().toLowerCase();
     const user = await prisma.user.findFirst({ where: { OR: [{ email: identifier }, { phone: request.body.identifier.trim() }] } });
-    if (!user || user.status === "DELETED" || !user.passwordHash || !(await verifyPassword(request.body.password, user.passwordHash))) {
-      return reply.code(401).send({ error: "INVALID_CREDENTIALS" });
-    }
+    if (!user || user.status === "DELETED" || !user.passwordHash || !(await verifyPassword(request.body.password, user.passwordHash))) return reply.code(401).send({ error: "INVALID_CREDENTIALS" });
     if (user.status === "SUSPENDED") return reply.code(403).send({ error: "ACCOUNT_SUSPENDED" });
 
     const refreshToken = createRefreshToken();
     await prisma.authSession.create({ data: { userId: user.id, refreshTokenHash: hashToken(refreshToken), expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS) } });
     const accessToken = await issueAccessToken(user.id, user.role);
-
     return { accessToken, refreshToken, expiresIn: 900, user: publicUser(user) };
   });
 
@@ -70,12 +62,29 @@ export async function authRoutes(app: FastifyInstance) {
       prisma.authSession.update({ where: { id: current.id }, data: { revokedAt: new Date(), lastUsedAt: new Date() } }),
       prisma.authSession.create({ data: { userId: current.userId, refreshTokenHash: hashToken(nextRefreshToken), expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS) } }),
     ]);
-
     return { accessToken: await issueAccessToken(current.user.id, current.user.role), refreshToken: nextRefreshToken, expiresIn: 900 };
   });
 
   app.post<{ Body: { refreshToken: string } }>("/v1/auth/logout", async (request, reply) => {
     await prisma.authSession.updateMany({ where: { refreshTokenHash: hashToken(request.body.refreshToken), revokedAt: null }, data: { revokedAt: new Date() } });
     return reply.code(204).send();
+  });
+
+  app.post<{ Body: { category?: string } }>("/v1/auth/become-provider", { preHandler: requireAuth }, async (request, reply) => {
+    const userId = request.user!.id;
+    const category = request.body.category?.trim() || "GENERAL";
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { driverProfile: true, serviceProvider: true } });
+    if (!user || user.status !== "ACTIVE") return reply.code(403).send({ error: "ACCOUNT_NOT_ACTIVE" });
+    if (user.role !== "CUSTOMER" && user.role !== "DRIVER" && user.role !== "SERVICE_PROVIDER") return reply.code(403).send({ error: "ROLE_NOT_ELIGIBLE" });
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (user.role === "CUSTOMER") {
+        await tx.user.update({ where: { id: userId }, data: { role: "DRIVER" } });
+      }
+      await tx.driverProfile.upsert({ where: { userId }, create: { userId, isOnline: false, isAvailable: false }, update: {} });
+      return tx.user.findUniqueOrThrow({ where: { id: userId } });
+    });
+
+    return { user: publicUser(updated), provider: { category, isOnline: false, isAvailable: false } };
   });
 }
