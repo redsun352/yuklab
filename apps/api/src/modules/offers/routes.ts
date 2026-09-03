@@ -121,6 +121,7 @@ export async function offerRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const order = await prisma.order.findFirst({
         where: { id: req.params.orderId, customerId: req.user!.id },
+        select: { id: true, status: true },
       });
       if (!order) {
         return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
@@ -129,46 +130,60 @@ export async function offerRoutes(app: FastifyInstance) {
         return reply.code(409).send({ error: "ORDER_NOT_ACCEPTING_OFFERS" });
       }
 
-      const offer = await prisma.offer.findFirst({
-        where: {
-          id: req.params.offerId,
-          orderId: order.id,
-          status: "PENDING",
-        },
-      });
-      if (!offer) {
-        return reply.code(404).send({ error: "OFFER_NOT_FOUND" });
+      try {
+        const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+          // Claim the order atomically so two simultaneous accepts cannot both win.
+          const claimed = await tx.order.updateMany({
+            where: {
+              id: order.id,
+              customerId: req.user!.id,
+              status: { in: ["PUBLISHED", "OFFERING"] },
+            },
+            data: { status: "DRIVER_ASSIGNED" },
+          });
+          if (claimed.count !== 1) throw new Error("ORDER_ALREADY_ASSIGNED");
+
+          const selected = await tx.offer.findFirst({
+            where: {
+              id: req.params.offerId,
+              orderId: order.id,
+              status: "PENDING",
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+            },
+          });
+          if (!selected) throw new Error("OFFER_NOT_FOUND_OR_EXPIRED");
+
+          await tx.offer.updateMany({
+            where: { orderId: order.id, status: "PENDING", id: { not: selected.id } },
+            data: { status: "REJECTED" },
+          });
+
+          const acceptedOffer = await tx.offer.update({
+            where: { id: selected.id },
+            data: { status: "ACCEPTED" },
+          });
+
+          const updatedOrder = await tx.order.update({
+            where: { id: order.id },
+            data: { assignedDriverId: selected.providerId },
+          });
+
+          return { selected: acceptedOffer, updatedOrder };
+        });
+
+        return {
+          order: serializeBigInt(accepted.updatedOrder),
+          offer: serializeBigInt(accepted.selected),
+        };
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === "ORDER_ALREADY_ASSIGNED") {
+          return reply.code(409).send({ error: "ORDER_NOT_ACCEPTING_OFFERS" });
+        }
+        if (error instanceof Error && error.message === "OFFER_NOT_FOUND_OR_EXPIRED") {
+          return reply.code(410).send({ error: "OFFER_EXPIRED_OR_NOT_FOUND" });
+        }
+        throw error;
       }
-      if (offer.expiresAt && offer.expiresAt <= new Date()) {
-        return reply.code(410).send({ error: "OFFER_EXPIRED" });
-      }
-
-      const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        await tx.offer.updateMany({
-          where: { orderId: order.id, status: "PENDING" },
-          data: { status: "REJECTED" },
-        });
-
-        const selected = await tx.offer.update({
-          where: { id: offer.id },
-          data: { status: "ACCEPTED" },
-        });
-
-        const updatedOrder = await tx.order.update({
-          where: { id: order.id },
-          data: {
-            status: "DRIVER_ASSIGNED",
-            assignedDriverId: offer.providerId,
-          },
-        });
-
-        return { selected, updatedOrder };
-      });
-
-      return {
-        order: serializeBigInt(accepted.updatedOrder),
-        offer: serializeBigInt(accepted.selected),
-      };
     },
   );
 }
