@@ -1,4 +1,4 @@
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCallback);
@@ -25,8 +25,4 @@ export function createRefreshToken(): string {
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
-}
-
-function createHash(algorithm: "sha256") {
-  return require("node:crypto").createHash(algorithm) as ReturnType<typeof import("node:crypto").createHash>;
 }
