@@ -73,12 +73,28 @@ model User {
   serviceProvider   ServiceProvider?
   vehicles          Vehicle[]
   orders            Order[]    @relation("CustomerOrders")
+  assignedOrders    Order[]    @relation("DriverOrders")
   offers            Offer[]
   documents         Document[]
   auditLogs         AuditLog[]
+  sessions          AuthSession[]
 
   @@index([role, status])
   @@index([createdAt])
+}
+
+model AuthSession {
+  id               String   @id @default(cuid())
+  userId           String
+  refreshTokenHash String   @unique
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  lastUsedAt       DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 model DriverProfile {
@@ -201,32 +217,33 @@ model TrackingEvent {
 }
 
 model Document {
-  id           String             @id @default(cuid())
-  userId       String
-  type         String
-  fileUrl      String
-  status       VerificationStatus @default(PENDING)
+  id              String             @id @default(cuid())
+  userId          String
+  type            String
+  fileUrl         String
+  status          VerificationStatus @default(PENDING)
   rejectionReason String?
-  reviewedAt   DateTime?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  reviewedAt      DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
 }
 
 model Message {
-  id          String   @id @default(cuid())
-  orderId     String
-  senderId    String
-  body        String
+  id            String   @id @default(cuid())
+  orderId       String
+  senderId      String
+  body          String
   attachmentUrl String?
-  createdAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
 
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId, createdAt])
+  @@index([senderId, createdAt])
 }
 
 model AuditLog {
