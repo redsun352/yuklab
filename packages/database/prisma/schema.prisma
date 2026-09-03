@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  DRIVER
+  SERVICE_PROVIDER
+  BUSINESS
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum OrderStatus {
+  DRAFT
+  PUBLISHED
+  OFFERING
+  ACCEPTED
+  DRIVER_ASSIGNED
+  EN_ROUTE_PICKUP
+  ARRIVED_PICKUP
+  LOADED
+  IN_TRANSIT
+  ARRIVED_DELIVERY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+  FAILED
+  DISPUTED
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id                String     @id @default(cuid())
+  email             String?    @unique
+  phone             String?    @unique
+  passwordHash      String?
+  firstName         String
+  lastName          String
+  preferredLanguage String     @default("tr-TR")
+  role              UserRole   @default(CUSTOMER)
+  status            UserStatus @default(PENDING)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  driverProfile     DriverProfile?
+  serviceProvider   ServiceProvider?
+  vehicles          Vehicle[]
+  orders            Order[]    @relation("CustomerOrders")
+  offers            Offer[]
+  documents         Document[]
+  auditLogs         AuditLog[]
+
+  @@index([role, status])
+  @@index([createdAt])
+}
+
+model DriverProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  isOnline          Boolean  @default(false)
+  isAvailable       Boolean  @default(false)
+  rating            Decimal  @default(0) @db.Decimal(3,2)
+  completedJobs     Int      @default(0)
+  cancellationRate  Decimal  @default(0) @db.Decimal(5,2)
+  reliabilityScore  Decimal  @default(0) @db.Decimal(5,2)
+  serviceRadiusKm   Decimal  @default(25) @db.Decimal(6,2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ServiceProvider {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  category    String
+  isOnline    Boolean  @default(false)
+  isAvailable Boolean  @default(false)
+  rating      Decimal  @default(0) @db.Decimal(3,2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Vehicle {
+  id             String   @id @default(cuid())
+  ownerId        String
+  type           String
+  subtype        String?
+  plateNumber    String?  @unique
+  capacityKg     Decimal? @db.Decimal(12,2)
+  volumeM3       Decimal? @db.Decimal(12,3)
+  refrigerated   Boolean  @default(false)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  owner          User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  orders         Order[]
+
+  @@index([ownerId, active])
+  @@index([type, active])
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  customerId          String
+  assignedDriverId    String?
+  vehicleId           String?
+  serviceType         String
+  status              OrderStatus @default(DRAFT)
+  pickupAddress       String
+  deliveryAddress     String?
+  pickupLat           Decimal?    @db.Decimal(10,7)
+  pickupLng           Decimal?    @db.Decimal(10,7)
+  deliveryLat         Decimal?    @db.Decimal(10,7)
+  deliveryLng         Decimal?    @db.Decimal(10,7)
+  scheduledAt         DateTime?
+  budgetMinor         BigInt?
+  currency            String      @default("TRY")
+  urgency             Int         @default(0)
+  payload             Json?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  customer            User        @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
+  assignedDriver      User?       @relation("DriverOrders", fields: [assignedDriverId], references: [id], onDelete: SetNull)
+  vehicle             Vehicle?    @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  offers              Offer[]
+  trackingEvents      TrackingEvent[]
+  messages            Message[]
+
+  @@index([customerId, createdAt])
+  @@index([status, createdAt])
+  @@index([assignedDriverId, status])
+}
+
+model Offer {
+  id           String      @id @default(cuid())
+  orderId      String
+  providerId   String
+  amountMinor  BigInt
+  currency     String      @default("TRY")
+  etaMinutes   Int?
+  note         String?
+  status       OfferStatus @default(PENDING)
+  expiresAt    DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider     User        @relation(fields: [providerId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, status])
+  @@index([providerId, createdAt])
+}
+
+model TrackingEvent {
+  id          String   @id @default(cuid())
+  orderId     String
+  actorId     String?
+  eventType   String
+  lat         Decimal? @db.Decimal(10,7)
+  lng         Decimal? @db.Decimal(10,7)
+  etaSeconds  Int?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([eventType, createdAt])
+}
+
+model Document {
+  id           String             @id @default(cuid())
+  userId       String
+  type         String
+  fileUrl      String
+  status       VerificationStatus @default(PENDING)
+  rejectionReason String?
+  reviewedAt   DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  orderId     String
+  senderId    String
+  body        String
+  attachmentUrl String?
+  createdAt   DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}
