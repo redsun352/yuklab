@@ -16,5 +16,6 @@
   },
   "exports": {
     ".": "./src/client.ts"
-  }
+  },
+  "types": "./src/client.ts"
 }

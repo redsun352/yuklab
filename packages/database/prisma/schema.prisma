@@ -195,6 +195,7 @@ model Offer {
   order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
   provider     User        @relation(fields: [providerId], references: [id], onDelete: Restrict)
 
+  @@unique([orderId, providerId, status])
   @@index([orderId, status])
   @@index([providerId, createdAt])
 }
