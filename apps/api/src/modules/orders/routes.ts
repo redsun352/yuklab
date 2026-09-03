@@ -1,26 +1,27 @@
 import type { FastifyInstance } from "fastify";
 import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../auth/guard";
+import type { Prisma } from "@yuklab/database";
 
 const ORDER_STATUSES = ["DRAFT", "PUBLISHED", "OFFERING"] as const;
 
+type OrderCreateBody = {
+  serviceType: string;
+  pickupAddress: string;
+  deliveryAddress?: string;
+  pickupLat?: number;
+  pickupLng?: number;
+  deliveryLat?: number;
+  deliveryLng?: number;
+  scheduledAt?: string;
+  budgetMinor?: string | number;
+  currency?: string;
+  urgency?: number;
+  payload?: Prisma.InputJsonValue;
+};
+
 export async function orderRoutes(app: FastifyInstance) {
-  app.post<{
-    Body: {
-      serviceType: string;
-      pickupAddress: string;
-      deliveryAddress?: string;
-      pickupLat?: number;
-      pickupLng?: number;
-      deliveryLat?: number;
-      deliveryLng?: number;
-      scheduledAt?: string;
-      budgetMinor?: string | number;
-      currency?: string;
-      urgency?: number;
-      payload?: Record<string, unknown>;
-    };
-  }>("/v1/orders", { preHandler: requireAuth }, async (request, reply) => {
+  app.post<{ Body: OrderCreateBody }>("/v1/orders", { preHandler: requireAuth }, async (request, reply) => {
     const body = request.body;
     if (!body.serviceType?.trim() || !body.pickupAddress?.trim()) {
       return reply.code(400).send({ error: "INVALID_INPUT" });
@@ -47,31 +48,18 @@ export async function orderRoutes(app: FastifyInstance) {
         status: "PUBLISHED",
       },
       select: {
-        id: true,
-        serviceType: true,
-        status: true,
-        pickupAddress: true,
-        deliveryAddress: true,
-        pickupLat: true,
-        pickupLng: true,
-        deliveryLat: true,
-        deliveryLng: true,
-        scheduledAt: true,
-        budgetMinor: true,
-        currency: true,
-        urgency: true,
-        createdAt: true,
+        id: true, serviceType: true, status: true, pickupAddress: true, deliveryAddress: true,
+        pickupLat: true, pickupLng: true, deliveryLat: true, deliveryLng: true, scheduledAt: true,
+        budgetMinor: true, currency: true, urgency: true, createdAt: true,
       },
-    });
+    );
 
     return reply.code(201).send({ order: serializeBigInt(order) });
   });
 
   app.get("/v1/orders", { preHandler: requireAuth }, async (request) => {
     const orders = await prisma.order.findMany({
-      where: { customerId: request.user!.id },
-      orderBy: { createdAt: "desc" },
-      take: 50,
+      where: { customerId: request.user!.id }, orderBy: { createdAt: "desc" }, take: 50,
       select: { id: true, serviceType: true, status: true, pickupAddress: true, deliveryAddress: true, scheduledAt: true, budgetMinor: true, currency: true, urgency: true, createdAt: true },
     });
     return { orders: orders.map(serializeBigInt) };
