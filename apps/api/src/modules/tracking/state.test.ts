@@ -36,7 +36,10 @@ describe("driver tracking state", () => {
     await setDriverLocation({ driverId: `${prefix}-near`, lat: 38.723, lng: 35.489, timestamp: now });
     await setDriverLocation({ driverId: `${prefix}-outside`, lat: 39.1, lng: 35.9, timestamp: now });
 
-    await expect(findNearbyDriverIds(38.7225, 35.4875, 5)).resolves.toEqual([
+    const nearby = await findNearbyDriverIds(38.7225, 35.4875, 5);
+    const testDrivers = nearby.filter((driverId) => driverId.startsWith(prefix));
+
+    expect(testDrivers).toEqual([
       `${prefix}-near`,
       `${prefix}-far`,
     ]);
