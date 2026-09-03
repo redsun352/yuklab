@@ -45,7 +45,9 @@ function validateVehicleBody(body: Record<string, unknown>) {
       : typeof subtypeValue === "string"
         ? subtypeValue.trim().toUpperCase()
         : "__INVALID__";
-  if (subtype === "__INVALID__" || subtype.length > 80) return { error: "Invalid vehicle subtype" };
+  if (subtype === "__INVALID__" || (subtype !== undefined && subtype.length > 80)) {
+    return { error: "Invalid vehicle subtype" };
+  }
 
   const capacityKg = finiteNumber(body.capacityKg);
   if (body.capacityKg !== undefined && capacityKg === undefined) return { error: "Invalid capacityKg" };
