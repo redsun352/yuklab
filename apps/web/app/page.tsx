@@ -14,7 +14,7 @@ export default function HomePage() {
             Yükünü doğru hizmet sağlayıcıyla buluştur.
           </h1>
           <p style={{ fontSize: 20, lineHeight: 1.6, color: "var(--muted)" }}>
-            Türkiye'den dünyaya ölçeklenmek üzere tasarlanan akıllı lojistik ağı.
+            Türkiye&apos;den dünyaya ölçeklenmek üzere tasarlanan akıllı lojistik ağı.
           </p>
         </div>
 
