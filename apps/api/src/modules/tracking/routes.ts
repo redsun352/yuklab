@@ -37,11 +37,7 @@ export async function trackingRoutes(app: FastifyInstance) {
     const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
     if (!isAdmin && user.id !== request.params.driverId) {
       const relatedOrder = await prisma.order.findFirst({
-        where: {
-          assignedDriverId: request.params.driverId,
-          customerId: user.id,
-          status: { notIn: ["DRAFT", "CANCELLED", "EXPIRED", "FAILED", "COMPLETED"] },
-        },
+        where: { assignedDriverId: request.params.driverId, customerId: user.id, status: { notIn: ["DRAFT", "CANCELLED", "EXPIRED", "FAILED", "COMPLETED"] } },
         select: { id: true },
       });
       if (!relatedOrder) return reply.code(403).send({ error: "FORBIDDEN" });
@@ -52,11 +48,26 @@ export async function trackingRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { orderId: string } }>("/v1/tracking/orders/:orderId/location", { preHandler: requireAuth }, async (request, reply) => {
-    const order = await prisma.order.findFirst({ where: { id: request.params.orderId, OR: [{ customerId: request.user!.id }, { assignedDriverId: request.user!.id }] }, select: { assignedDriverId: true } });
+    const order = await prisma.order.findFirst({
+      where: { id: request.params.orderId, OR: [{ customerId: request.user!.id }, { assignedDriverId: request.user!.id }] },
+      select: { id: true, assignedDriverId: true, status: true, pickupAddress: true, deliveryAddress: true, pickupLat: true, pickupLng: true, deliveryLat: true, deliveryLng: true },
+    });
     if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
     if (!order.assignedDriverId) return reply.code(404).send({ error: "DRIVER_NOT_ASSIGNED" });
     const location = await getDriverLocation(order.assignedDriverId);
     if (!location) return reply.code(404).send({ error: "LOCATION_NOT_AVAILABLE" });
-    return { location };
+    return {
+      location,
+      order: {
+        id: order.id,
+        status: order.status,
+        pickupAddress: order.pickupAddress,
+        deliveryAddress: order.deliveryAddress,
+        pickupLat: order.pickupLat,
+        pickupLng: order.pickupLng,
+        deliveryLat: order.deliveryLat,
+        deliveryLng: order.deliveryLng,
+      },
+    };
   });
 }
