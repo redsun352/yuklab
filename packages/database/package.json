@@ -1,0 +1,17 @@
+{
+  "name": "@yuklab/database",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "generate": "prisma generate",
+    "format": "prisma format",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "6.15.0"
+  },
+  "devDependencies": {
+    "prisma": "6.15.0",
+    "typescript": "5.9.2"
+  }
+}
