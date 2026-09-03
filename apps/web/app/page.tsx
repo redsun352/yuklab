@@ -1,31 +1,80 @@
+"use client";
+
+import { FormEvent, useState } from "react";
+
 const services = [
-  { title: "Yük Taşımacılığı", description: "Şehir içi, şehirler arası ve parsiyel taşımacılık." },
-  { title: "Kurye", description: "Motosikletli ve acil teslimat çözümleri." },
-  { title: "Acil Yardım", description: "Çekici, akü, lastik, yakıt ve yol yardım desteği." },
+  { title: "Yük Taşımacılığı", description: "Şehir içi, şehirler arası ve parsiyel taşımacılık.", icon: "▣" },
+  { title: "Kurye", description: "Motosikletli ve acil teslimat çözümleri.", icon: "↗" },
+  { title: "Acil Yardım", description: "Çekici, akü, lastik, yakıt ve yol yardım desteği.", icon: "!" },
 ];
 
 export default function HomePage() {
+  const [pickup, setPickup] = useState("");
+  const [delivery, setDelivery] = useState("");
+  const [serviceType, setServiceType] = useState("Yük Taşımacılığı");
+  const [submitted, setSubmitted] = useState(false);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitted(true);
+  }
+
   return (
     <main>
-      <section style={{ padding: "72px 24px", maxWidth: 1180, margin: "0 auto" }}>
-        <div style={{ maxWidth: 760 }}>
-          <p style={{ color: "var(--brand)", fontWeight: 700, letterSpacing: "0.08em" }}>YÜKLAB</p>
-          <h1 style={{ fontSize: "clamp(42px, 7vw, 76px)", lineHeight: 1.02, margin: "16px 0" }}>
-            Yükünü doğru hizmet sağlayıcıyla buluştur.
-          </h1>
-          <p style={{ fontSize: 20, lineHeight: 1.6, color: "var(--muted)" }}>
+      <section className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">YÜKLAB · SMART LOGISTICS NETWORK</p>
+          <h1>Yükünü doğru hizmet sağlayıcıyla buluştur.</h1>
+          <p className="lead">
             Türkiye&apos;den dünyaya ölçeklenmek üzere tasarlanan akıllı lojistik ağı.
+            Taşıma, kurye ve acil yardım ihtiyaçlarını tek noktadan yönet.
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginTop: 48 }}>
-          {services.map((service) => (
-            <article key={service.title} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 20, padding: 24 }}>
-              <h2 style={{ marginTop: 0 }}>{service.title}</h2>
-              <p style={{ color: "var(--muted)", lineHeight: 1.5 }}>{service.description}</p>
-            </article>
-          ))}
-        </div>
+        <form className="request-card" onSubmit={submit}>
+          <div className="request-heading">
+            <div>
+              <span className="mini-label">HIZLI TALEP</span>
+              <h2>Taşıma ihtiyacını oluştur</h2>
+            </div>
+            <span className="status-dot" aria-label="Sistem hazır" />
+          </div>
+
+          <label>
+            Hizmet
+            <select value={serviceType} onChange={(event) => setServiceType(event.target.value)}>
+              <option>Yük Taşımacılığı</option>
+              <option>Kurye</option>
+              <option>Acil Yardım</option>
+            </select>
+          </label>
+          <label>
+            Nereden?
+            <input value={pickup} onChange={(event) => setPickup(event.target.value)} placeholder="Pickup adresi" required />
+          </label>
+          <label>
+            Nereye?
+            <input value={delivery} onChange={(event) => setDelivery(event.target.value)} placeholder="Teslimat adresi" />
+          </label>
+          <button type="submit">Talep oluştur <span>→</span></button>
+          {submitted && <p className="success">Talep taslağın hazır. Giriş yaptıktan sonra yayınlayabilirsin.</p>}
+        </form>
+      </section>
+
+      <section className="services" aria-label="YükLab hizmetleri">
+        {services.map((service) => (
+          <article className="service-card" key={service.title}>
+            <span className="service-icon">{service.icon}</span>
+            <h2>{service.title}</h2>
+            <p>{service.description}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="trust-row">
+        <span>● Gerçek zamanlı eşleştirme</span>
+        <span>● Canlı konum takibi</span>
+        <span>● Güvenli ödeme altyapısı</span>
       </section>
     </main>
   );
