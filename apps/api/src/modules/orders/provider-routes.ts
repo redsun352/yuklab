@@ -45,7 +45,7 @@ export async function providerOrderRoutes(app: FastifyInstance) {
       );
 
       const matchedOrders = matched
-        .filter((item): item is { order: (typeof orders)[number]; match: NonNullable<typeof item> extends never ? never : Awaited<ReturnType<typeof findMatches>>[number] } => item !== null)
+        .filter((item) => item !== null)
         .sort((a, b) => {
           if (b.order.urgency !== a.order.urgency) return b.order.urgency - a.order.urgency;
           return b.match.score - a.match.score;
