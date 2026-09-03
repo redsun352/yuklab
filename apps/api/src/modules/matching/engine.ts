@@ -42,32 +42,35 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
   });
 
   const routing = getRoutingProvider();
-  const candidates: MatchCandidate[] = [];
-  for (const provider of providers) {
-    const location = await getDriverLocation(provider.user.id);
-    if (!location) continue;
+  const candidates = await Promise.all(
+    providers.map(async (provider): Promise<MatchCandidate | null> => {
+      const location = await getDriverLocation(provider.user.id);
+      if (!location) return null;
 
-    const distanceKm = haversineKm(pickupLat, pickupLng, location.lat, location.lng);
-    const route = await routing.route(
-      { lat: location.lat, lng: location.lng },
-      { lat: pickupLat, lng: pickupLng },
-    );
-    const etaMinutes = route ? Math.max(1, Math.ceil(route.durationSeconds / 60)) : null;
-    const distanceScore = Math.max(0, 40 - Math.min(distanceKm, 40));
-    const ratingScore = Number(provider.rating) * 6;
-    const reliabilityScore = Number(provider.reliabilityScore) * 0.2;
-    const etaScore = etaMinutes === null ? 0 : Math.max(0, 20 - Math.min(etaMinutes, 20));
-    const score = distanceScore + ratingScore + reliabilityScore + etaScore;
+      const distanceKm = haversineKm(pickupLat, pickupLng, location.lat, location.lng);
+      const route = await routing.route(
+        { lat: location.lat, lng: location.lng },
+        { lat: pickupLat, lng: pickupLng },
+      );
+      const etaMinutes = route ? Math.max(1, Math.ceil(route.durationSeconds / 60)) : null;
+      const distanceScore = Math.max(0, 40 - Math.min(distanceKm, 40));
+      const ratingScore = Number(provider.rating) * 6;
+      const reliabilityScore = Number(provider.reliabilityScore) * 0.2;
+      const etaScore = etaMinutes === null ? 0 : Math.max(0, 20 - Math.min(etaMinutes, 20));
+      const score = distanceScore + ratingScore + reliabilityScore + etaScore;
 
-    candidates.push({
-      providerId: provider.user.id,
-      score,
-      distanceKm,
-      rating: Number(provider.rating),
-      reliabilityScore: Number(provider.reliabilityScore),
-      etaMinutes,
-    });
-  }
+      return {
+        providerId: provider.user.id,
+        score,
+        distanceKm,
+        rating: Number(provider.rating),
+        reliabilityScore: Number(provider.reliabilityScore),
+        etaMinutes,
+      };
+    }),
+  );
 
-  return candidates.sort((a, b) => b.score - a.score);
+  return candidates
+    .filter((candidate): candidate is MatchCandidate => candidate !== null)
+    .sort((a, b) => b.score - a.score);
 }
