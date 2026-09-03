@@ -17,6 +17,8 @@
     "@fastify/jwt": "9.1.0",
     "@fastify/rate-limit": "10.2.1",
     "@fastify/websocket": "11.0.2",
+    "@yuklab/database": "workspace:*",
+    "@yuklab/types": "workspace:*",
     "fastify": "5.4.0",
     "ioredis": "5.7.0",
     "jose": "6.1.0",
