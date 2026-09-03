@@ -18,13 +18,19 @@ export async function trackingRoutes(app: FastifyInstance) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       return reply.code(400).send({ error: "INVALID_LOCATION" });
     }
+    if (heading !== undefined && (!Number.isFinite(heading) || heading < 0 || heading >= 360)) {
+      return reply.code(400).send({ error: "INVALID_HEADING" });
+    }
+    if (speedKph !== undefined && (!Number.isFinite(speedKph) || speedKph < 0 || speedKph > 500)) {
+      return reply.code(400).send({ error: "INVALID_SPEED" });
+    }
     if (accuracyM !== undefined && (!Number.isFinite(accuracyM) || accuracyM < 0)) {
       return reply.code(400).send({ error: "INVALID_ACCURACY" });
     }
     const time = timestamp ? new Date(timestamp) : new Date();
     if (Number.isNaN(time.getTime())) return reply.code(400).send({ error: "INVALID_TIMESTAMP" });
 
-    setDriverLocation({
+    await setDriverLocation({
       driverId: request.user!.id,
       lat,
       lng,
@@ -40,7 +46,7 @@ export async function trackingRoutes(app: FastifyInstance) {
     "/v1/tracking/drivers/:driverId/location",
     { preHandler: requireAuth },
     async (request, reply) => {
-      const location = getDriverLocation(request.params.driverId);
+      const location = await getDriverLocation(request.params.driverId);
       if (!location) return reply.code(404).send({ error: "LOCATION_NOT_AVAILABLE" });
       return { location };
     },
@@ -59,7 +65,7 @@ export async function trackingRoutes(app: FastifyInstance) {
       });
       if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
       if (!order.assignedDriverId) return reply.code(404).send({ error: "DRIVER_NOT_ASSIGNED" });
-      const location = getDriverLocation(order.assignedDriverId);
+      const location = await getDriverLocation(order.assignedDriverId);
       if (!location) return reply.code(404).send({ error: "LOCATION_NOT_AVAILABLE" });
       return { location };
     },
