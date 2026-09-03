@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import { userRoutes } from "./routes/users";
+import { authRoutes } from "./modules/auth/routes";
+import { orderRoutes } from "./modules/orders/routes";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
@@ -10,16 +12,20 @@ export function buildApp() {
     version: "0.1.0",
   }));
 
+  app.register(authRoutes);
   app.register(userRoutes);
+  app.register(orderRoutes);
 
   return app;
 }
 
-const app = buildApp();
-const port = Number(process.env.PORT ?? 3001);
-const host = process.env.HOST ?? "0.0.0.0";
+if (process.env.NODE_ENV !== "test") {
+  const app = buildApp();
+  const port = Number(process.env.PORT ?? 3001);
+  const host = process.env.HOST ?? "0.0.0.0";
 
-app.listen({ port, host }).catch((error) => {
-  app.log.error(error);
-  process.exit(1);
-});
+  app.listen({ port, host }).catch((error) => {
+    app.log.error(error);
+    process.exit(1);
+  });
+}
