@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@yuklab/database";
 import { findNearbyDriverIds, getDriverLocation } from "../tracking/state";
+import { getRoutingProvider } from "../routing/provider";
 
 type MatchCandidate = {
   providerId: string;
@@ -40,17 +41,23 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
     include: { user: { select: { id: true } } },
   });
 
+  const routing = getRoutingProvider();
   const candidates: MatchCandidate[] = [];
   for (const provider of providers) {
     const location = await getDriverLocation(provider.user.id);
     if (!location) continue;
 
     const distanceKm = haversineKm(pickupLat, pickupLng, location.lat, location.lng);
+    const route = await routing.route(
+      { lat: location.lat, lng: location.lng },
+      { lat: pickupLat, lng: pickupLng },
+    );
+    const etaMinutes = route ? Math.max(1, Math.ceil(route.durationSeconds / 60)) : null;
     const distanceScore = Math.max(0, 40 - Math.min(distanceKm, 40));
     const ratingScore = Number(provider.rating) * 6;
     const reliabilityScore = Number(provider.reliabilityScore) * 0.2;
-    const availabilityScore = 20;
-    const score = distanceScore + ratingScore + reliabilityScore + availabilityScore;
+    const etaScore = etaMinutes === null ? 0 : Math.max(0, 20 - Math.min(etaMinutes, 20));
+    const score = distanceScore + ratingScore + reliabilityScore + etaScore;
 
     candidates.push({
       providerId: provider.user.id,
@@ -58,8 +65,7 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
       distanceKm,
       rating: Number(provider.rating),
       reliabilityScore: Number(provider.reliabilityScore),
-      // ETA requires a routing provider; never fabricate road ETA from straight-line distance.
-      etaMinutes: null,
+      etaMinutes,
     });
   }
 
