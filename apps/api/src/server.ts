@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { userRoutes } from "./routes/users";
 import { authRoutes } from "./modules/auth/routes";
@@ -11,7 +12,15 @@ import { trackingWsTokenRoutes } from "./modules/tracking/ws-token";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
+  const allowedOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
+  app.register(cors, {
+    origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
+    credentials: true,
+  });
   app.register(websocket);
   app.get("/health", async () => ({ status: "ok", service: "yuklab-api", version: "0.1.0" }));
   app.register(authRoutes);
