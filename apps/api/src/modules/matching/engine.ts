@@ -40,6 +40,11 @@ function stringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function stringList(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() ? [value] : [];
+  return stringArray(value);
+}
+
 function positiveNumber(value: unknown): number | null {
   const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(number) && number > 0 ? number : null;
@@ -59,8 +64,8 @@ function requirementsFromPayload(payload: unknown): OrderRequirements {
     : {};
 
   return {
-    vehicleTypes: stringArray(data.vehicleTypes ?? data.requiredVehicleTypes ?? vehicle.types ?? vehicle.type),
-    vehicleSubtypes: stringArray(data.vehicleSubtypes ?? data.requiredVehicleSubtypes ?? vehicle.subtypes ?? vehicle.subtype),
+    vehicleTypes: stringList(data.vehicleTypes ?? data.requiredVehicleTypes ?? vehicle.types ?? vehicle.type),
+    vehicleSubtypes: stringList(data.vehicleSubtypes ?? data.requiredVehicleSubtypes ?? vehicle.subtypes ?? vehicle.subtype),
     minCapacityKg: positiveNumber(data.weightKg ?? data.loadWeightKg ?? load.weightKg ?? vehicle.minCapacityKg),
     minVolumeM3: positiveNumber(data.volumeM3 ?? data.loadVolumeM3 ?? load.volumeM3 ?? vehicle.minVolumeM3),
     refrigerated: data.refrigerated === true || data.requiresRefrigeration === true || load.refrigerated === true || vehicle.refrigerated === true,
@@ -84,7 +89,10 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
   const requirements = requirementsFromPayload(order.payload);
   const pickupLat = Number(order.pickupLat);
   const pickupLng = Number(order.pickupLng);
-  const maxRadiusKm = Number(process.env.MATCHING_MAX_RADIUS_KM ?? 50);
+  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || Math.abs(pickupLat) > 90 || Math.abs(pickupLng) > 180) return [];
+
+  const configuredRadius = Number(process.env.MATCHING_MAX_RADIUS_KM ?? 50);
+  const maxRadiusKm = Number.isFinite(configuredRadius) && configuredRadius > 0 ? configuredRadius : 50;
   const nearbyIds = await findNearbyDriverIds(pickupLat, pickupLng, maxRadiusKm);
   if (nearbyIds.length === 0) return [];
 
@@ -113,7 +121,7 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
   const candidates = await Promise.all(
     providers.map(async (provider): Promise<MatchCandidate | null> => {
       const location = await getDriverLocation(provider.user.id);
-      if (!location) return null;
+      if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng) || Math.abs(location.lat) > 90 || Math.abs(location.lng) > 180) return null;
 
       const distanceKm = haversineKm(pickupLat, pickupLng, location.lat, location.lng);
       const serviceRadiusKm = Number(provider.serviceRadiusKm);
@@ -134,8 +142,10 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
       );
       const etaMinutes = route ? Math.max(1, Math.ceil(route.durationSeconds / 60)) : null;
       const distanceScore = Math.max(0, 40 - Math.min(distanceKm, 40));
-      const ratingScore = Number(provider.rating) * 6;
-      const reliabilityScore = Number(provider.reliabilityScore) * 0.2;
+      const rating = Number(provider.rating);
+      const reliability = Number(provider.reliabilityScore);
+      const ratingScore = Number.isFinite(rating) ? rating * 6 : 0;
+      const reliabilityScore = Number.isFinite(reliability) ? reliability * 0.2 : 0;
       const etaScore = etaMinutes === null ? 0 : Math.max(0, 20 - Math.min(etaMinutes, 20));
       const vehicleScore = vehicle ? 10 : 0;
       const score = distanceScore + ratingScore + reliabilityScore + etaScore + vehicleScore;
@@ -144,8 +154,8 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
         providerId: provider.user.id,
         score,
         distanceKm,
-        rating: Number(provider.rating),
-        reliabilityScore: Number(provider.reliabilityScore),
+        rating: Number.isFinite(rating) ? rating : 0,
+        reliabilityScore: Number.isFinite(reliability) ? reliability : 0,
         etaMinutes,
         vehicleId: vehicle?.id ?? null,
         vehicleType: vehicle?.type ?? null,
