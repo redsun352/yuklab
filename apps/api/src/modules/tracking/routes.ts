@@ -34,12 +34,12 @@ export async function trackingRoutes(app: FastifyInstance) {
       const relatedOrder = await prisma.order.findFirst({
         where: {
           assignedDriverId: request.params.driverId,
-          OR: [{ customerId: user.id }, { assignedDriverId: user.id }],
+          customerId: user.id,
           status: { notIn: ["DRAFT", "CANCELLED", "EXPIRED", "FAILED", "COMPLETED"] },
         },
         select: { id: true },
       });
-      if (!relatedOrder && user.role !== "SERVICE_PROVIDER") return reply.code(403).send({ error: "FORBIDDEN" });
+      if (!relatedOrder) return reply.code(403).send({ error: "FORBIDDEN" });
     }
     const location = await getDriverLocation(request.params.driverId);
     if (!location) return reply.code(404).send({ error: "LOCATION_NOT_AVAILABLE" });
