@@ -6,15 +6,7 @@ import { publishOrderLocation } from "./realtime";
 
 export async function trackingRoutes(app: FastifyInstance) {
   app.post<{
-    Body: {
-      lat: number;
-      lng: number;
-      heading?: number;
-      speedKph?: number;
-      accuracyM?: number;
-      timestamp?: string;
-      orderId?: string;
-    };
+    Body: { lat: number; lng: number; heading?: number; speedKph?: number; accuracyM?: number; timestamp?: string; orderId?: string };
   }>("/v1/tracking/location", { preHandler: requireRole("DRIVER", "SERVICE_PROVIDER") }, async (request, reply) => {
     const { lat, lng, heading, speedKph, accuracyM, timestamp, orderId } = request.body;
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return reply.code(400).send({ error: "INVALID_LOCATION" });
@@ -36,6 +28,19 @@ export async function trackingRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { driverId: string } }>("/v1/tracking/drivers/:driverId/location", { preHandler: requireAuth }, async (request, reply) => {
+    const user = request.user!;
+    const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
+    if (!isAdmin && user.id !== request.params.driverId) {
+      const relatedOrder = await prisma.order.findFirst({
+        where: {
+          assignedDriverId: request.params.driverId,
+          OR: [{ customerId: user.id }, { assignedDriverId: user.id }],
+          status: { notIn: ["DRAFT", "CANCELLED", "EXPIRED", "FAILED", "COMPLETED"] },
+        },
+        select: { id: true },
+      });
+      if (!relatedOrder && user.role !== "SERVICE_PROVIDER") return reply.code(403).send({ error: "FORBIDDEN" });
+    }
     const location = await getDriverLocation(request.params.driverId);
     if (!location) return reply.code(404).send({ error: "LOCATION_NOT_AVAILABLE" });
     return { location };
