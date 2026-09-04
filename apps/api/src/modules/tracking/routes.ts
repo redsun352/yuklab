@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus } from "@yuklab/database";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
 import { getDriverLocation, setDriverLocation } from "./state";
