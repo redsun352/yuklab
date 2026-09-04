@@ -60,7 +60,7 @@ async function startSubscriber(): Promise<void> {
     await subscriber.subscribe(channel);
     subscriber.on("message", (_channel, message) => {
       try {
-        const event = JSON.parse(message) as { orderId?: string; location?: DriverLocation; type?: string };
+        const event = JSON.parse(message) as { orderId?: string };
         if (event.orderId) fanout(event.orderId, message);
       } catch {
         // Ignore malformed pub/sub messages.
@@ -79,6 +79,19 @@ export function publishOrderLocation(orderId: string, location: DriverLocation):
 
 export function publishOrderStatus(orderId: string, from: string, to: string): void {
   publishRedis(orderId, { type: "order.status", orderId, from, status: to, timestamp: new Date().toISOString() });
+}
+
+export function publishOrderOffer(orderId: string, offer: { id: string; providerId: string; amountMinor: bigint; currency: string; etaMinutes: number | null; note: string | null; expiresAt: Date | null }): void {
+  publishRedis(orderId, {
+    type: "order.offer",
+    orderId,
+    offer: {
+      ...offer,
+      amountMinor: offer.amountMinor.toString(),
+      expiresAt: offer.expiresAt?.toISOString() ?? null,
+    },
+    timestamp: new Date().toISOString(),
+  });
 }
 
 export async function trackingRealtimeRoutes(app: FastifyInstance): Promise<void> {
