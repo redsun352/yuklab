@@ -63,4 +63,26 @@ describe("driver tracking state", () => {
     await expect(getDriverLocation(driverId)).resolves.toBeUndefined();
     await expect(findNearbyDriverIds(38.7225, 35.4875, 5)).resolves.not.toContain(driverId);
   });
+
+  it("rejects future-dated locations", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-09-04T00:00:00.000Z");
+    vi.setSystemTime(now);
+    const driverId = `tracking-test-${Date.now()}-future`;
+
+    await setDriverLocation({
+      driverId,
+      lat: 38.7225,
+      lng: 35.4875,
+      timestamp: new Date(now.getTime() + 61_000).toISOString(),
+    });
+
+    await expect(getDriverLocation(driverId)).resolves.toBeUndefined();
+    await expect(findNearbyDriverIds(38.7225, 35.4875, 5)).resolves.not.toContain(driverId);
+  });
+
+  it("rejects invalid geo search inputs", async () => {
+    await expect(findNearbyDriverIds(Number.NaN, 35.4875, 5)).resolves.toEqual([]);
+    await expect(findNearbyDriverIds(38.7225, 35.4875, 0)).resolves.toEqual([]);
+  });
 });
