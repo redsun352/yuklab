@@ -113,16 +113,8 @@ describe("critical customer-provider order flow", () => {
     expect(JSON.parse(accept.body).order.status).toBe("DRIVER_ASSIGNED");
     expect(JSON.parse(accept.body).order.assignedDriverId).toBe(provider.user.id);
 
-    const statuses = [
-      "EN_ROUTE_PICKUP",
-      "ARRIVED_PICKUP",
-      "LOADED",
-      "IN_TRANSIT",
-      "ARRIVED_DELIVERY",
-      "DELIVERED",
-      "COMPLETED",
-    ];
-    for (const status of statuses) {
+    const preTrackingStatuses = ["EN_ROUTE_PICKUP", "ARRIVED_PICKUP", "LOADED", "IN_TRANSIT"];
+    for (const status of preTrackingStatuses) {
       const transition = await app.inject({
         method: "POST",
         url: `/v1/orders/${orderId}/status`,
@@ -153,7 +145,27 @@ describe("critical customer-provider order flow", () => {
       url: `/v1/tracking/orders/${orderId}/location`,
       headers: auth(customer.accessToken),
     });
-    expect(tracking.statusCode).toBe(409);
-    expect(JSON.parse(tracking.body).error).toBe("TRACKING_NOT_ACTIVE");
+    expect(tracking.statusCode).toBe(200);
+    expect(JSON.parse(tracking.body).location.driverId).toBe(provider.user.id);
+    expect(JSON.parse(tracking.body).location.lat).toBe(38.72);
+
+    for (const status of ["ARRIVED_DELIVERY", "DELIVERED", "COMPLETED"]) {
+      const transition = await app.inject({
+        method: "POST",
+        url: `/v1/orders/${orderId}/status`,
+        headers: auth(provider.accessToken),
+        payload: { status },
+      });
+      expect(transition.statusCode, `transition to ${status}`).toBe(200);
+      expect(JSON.parse(transition.body).order.status).toBe(status);
+    }
+
+    const inactiveTracking = await app.inject({
+      method: "GET",
+      url: `/v1/tracking/orders/${orderId}/location`,
+      headers: auth(customer.accessToken),
+    });
+    expect(inactiveTracking.statusCode).toBe(409);
+    expect(JSON.parse(inactiveTracking.body).error).toBe("TRACKING_NOT_ACTIVE");
   });
 });
