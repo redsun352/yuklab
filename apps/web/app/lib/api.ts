@@ -47,6 +47,8 @@ export async function updateVehicle(accessToken: string, id: string, input: { ty
 export async function deactivateVehicle(accessToken: string, id: string) { return request<void>(`/v1/vehicles/${id}`, { ...auth(accessToken), method: "DELETE" }); }
 export async function sendTrackingLocation(accessToken: string, input: { lat: number; lng: number; heading?: number; speedKph?: number; accuracyM?: number; timestamp?: string; orderId?: string }) { return request<void>("/v1/tracking/location", { ...auth(accessToken), method: "POST", body: JSON.stringify(input) }); }
 export async function getOrderTracking(accessToken: string, orderId: string) { return request<TrackingData>(`/v1/tracking/orders/${orderId}/location`, auth(accessToken)); }
+export async function getTrackingWsToken(accessToken: string, orderId: string) { return request<{ token: string; expiresInSeconds: number }>(`/v1/tracking/orders/${orderId}/ws-token`, { ...auth(accessToken), method: "POST" }); }
+export function trackingWebSocketUrl(orderId: string): string { const base = API_BASE_URL.replace(/^http/i, "ws").replace(/\/$/, ""); return `${base}/v1/tracking/orders/${encodeURIComponent(orderId)}/ws`; }
 export async function getRoute(accessToken: string, from: RoutePoint, to: RoutePoint) {
   const params = new URLSearchParams({ fromLat: String(from.lat), fromLng: String(from.lng), toLat: String(to.lat), toLng: String(to.lng) });
   return request<RouteResult>(`/v1/routing/route?${params.toString()}`, auth(accessToken));
