@@ -31,11 +31,23 @@ function removeClient(orderId: string, socket: WebSocket): void {
   if (group.size === 0) clients.delete(orderId);
 }
 
-function fanout(orderId: string, location: DriverLocation): void {
+function fanout(orderId: string, message: string): void {
   const group = clients.get(orderId);
   if (!group) return;
-  const payload = JSON.stringify({ type: "driver.location", orderId, location });
-  for (const socket of group) if (socket.readyState === WebSocket.OPEN) socket.send(payload);
+  for (const socket of group) if (socket.readyState === WebSocket.OPEN) socket.send(message);
+}
+
+function publishRedis(orderId: string, event: Record<string, unknown>): void {
+  const message = JSON.stringify(event);
+  if (!redisUrl) {
+    fanout(orderId, message);
+    return;
+  }
+  if (!publisher) {
+    publisher = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
+    publisher.on("error", () => undefined);
+  }
+  void publisher.publish(channel, message).catch(() => fanout(orderId, message));
 }
 
 async function startSubscriber(): Promise<void> {
@@ -48,8 +60,8 @@ async function startSubscriber(): Promise<void> {
     await subscriber.subscribe(channel);
     subscriber.on("message", (_channel, message) => {
       try {
-        const event = JSON.parse(message) as { orderId?: string; location?: DriverLocation };
-        if (event.orderId && event.location) fanout(event.orderId, event.location);
+        const event = JSON.parse(message) as { orderId?: string; location?: DriverLocation; type?: string };
+        if (event.orderId) fanout(event.orderId, message);
       } catch {
         // Ignore malformed pub/sub messages.
       }
@@ -61,20 +73,12 @@ async function startSubscriber(): Promise<void> {
   }
 }
 
-function publishRedis(orderId: string, location: DriverLocation): void {
-  if (!redisUrl) {
-    fanout(orderId, location);
-    return;
-  }
-  if (!publisher) {
-    publisher = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
-    publisher.on("error", () => undefined);
-  }
-  void publisher.publish(channel, JSON.stringify({ orderId, location })).catch(() => fanout(orderId, location));
+export function publishOrderLocation(orderId: string, location: DriverLocation): void {
+  publishRedis(orderId, { type: "driver.location", orderId, location });
 }
 
-export function publishOrderLocation(orderId: string, location: DriverLocation): void {
-  publishRedis(orderId, location);
+export function publishOrderStatus(orderId: string, from: string, to: string): void {
+  publishRedis(orderId, { type: "order.status", orderId, from, status: to, timestamp: new Date().toISOString() });
 }
 
 export async function trackingRealtimeRoutes(app: FastifyInstance): Promise<void> {
