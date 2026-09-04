@@ -33,5 +33,6 @@ export function datetimeLocalToIso(value: string, timeZoneOffsetMinutes = new Da
 }
 
 export function isValidCoordinate(lat: number | null | undefined, lng: number | null | undefined): lat is number {
+  if (typeof lat !== "number" || typeof lng !== "number") return false;
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
