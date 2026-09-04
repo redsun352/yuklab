@@ -27,9 +27,12 @@ describe("order transitions", () => {
     expect(canTransition("COMPLETED", "IN_TRANSIT")).toBe(false);
   });
 
-  it("allows only the assigned driver to advance delivery state", () => {
+  it("allows only the assigned driver or service provider to advance delivery state", () => {
     expect(canActorTransition(
       "DRIVER", "driver-1", "customer-1", "driver-1", "DRIVER_ASSIGNED", "EN_ROUTE_PICKUP",
+    )).toBe(true);
+    expect(canActorTransition(
+      "SERVICE_PROVIDER", "provider-1", "customer-1", "provider-1", "DRIVER_ASSIGNED", "EN_ROUTE_PICKUP",
     )).toBe(true);
     expect(canActorTransition(
       "DRIVER", "driver-2", "customer-1", "driver-1", "DRIVER_ASSIGNED", "EN_ROUTE_PICKUP",
@@ -39,12 +42,15 @@ describe("order transitions", () => {
     )).toBe(false);
   });
 
-  it("allows customer or assigned driver to cancel an active order", () => {
+  it("allows customer or assigned provider to cancel an active order", () => {
     expect(canActorTransition(
       "CUSTOMER", "customer-1", "customer-1", "driver-1", "EN_ROUTE_PICKUP", "CANCELLED",
     )).toBe(true);
     expect(canActorTransition(
       "DRIVER", "driver-1", "customer-1", "driver-1", "EN_ROUTE_PICKUP", "CANCELLED",
+    )).toBe(true);
+    expect(canActorTransition(
+      "SERVICE_PROVIDER", "provider-1", "customer-1", "provider-1", "EN_ROUTE_PICKUP", "CANCELLED",
     )).toBe(true);
     expect(canActorTransition(
       "DRIVER", "driver-2", "customer-1", "driver-1", "EN_ROUTE_PICKUP", "CANCELLED",
