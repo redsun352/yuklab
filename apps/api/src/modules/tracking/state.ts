@@ -23,7 +23,9 @@ function key(driverId: string): string {
 
 function isFresh(location: DriverLocation): boolean {
   const timestampMs = Date.parse(location.timestamp);
-  return Number.isFinite(timestampMs) && timestampMs >= Date.now() - ttlSeconds * 1000;
+  if (!Number.isFinite(timestampMs)) return false;
+  const now = Date.now();
+  return timestampMs >= now - ttlSeconds * 1000 && timestampMs <= now + 60_000;
 }
 
 async function ensureRedis(): Promise<boolean> {
@@ -38,6 +40,7 @@ async function ensureRedis(): Promise<boolean> {
 }
 
 export async function setDriverLocation(location: DriverLocation): Promise<void> {
+  if (!isFresh(location)) return;
   locations.set(location.driverId, location);
   if (!(await ensureRedis())) return;
   try {
@@ -78,6 +81,8 @@ export async function findNearbyDriverIds(
   lng: number,
   radiusKm: number,
 ): Promise<string[]> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(radiusKm) || radiusKm <= 0) return [];
+
   if (await ensureRedis()) {
     try {
       const cutoff = Date.now() - ttlSeconds * 1000;
