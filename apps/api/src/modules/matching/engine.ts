@@ -4,6 +4,8 @@ import { getRoutingProvider } from "../routing/provider";
 
 type MatchCandidate = {
   providerId: string;
+  providerRole: "DRIVER" | "SERVICE_PROVIDER";
+  providerCategory: string | null;
   score: number;
   distanceKm: number;
   rating: number;
@@ -20,6 +22,7 @@ type MatchCandidate = {
 type OrderRequirements = {
   vehicleTypes: string[];
   vehicleSubtypes: string[];
+  providerCategories: string[];
   minCapacityKg: number | null;
   minVolumeM3: number | null;
   refrigerated: boolean;
@@ -51,9 +54,15 @@ function positiveNumber(value: unknown): number | null {
 }
 
 function requirementsFromPayload(payload: unknown): OrderRequirements {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return { vehicleTypes: [], vehicleSubtypes: [], minCapacityKg: null, minVolumeM3: null, refrigerated: false };
-  }
+  const empty: OrderRequirements = {
+    vehicleTypes: [],
+    vehicleSubtypes: [],
+    providerCategories: [],
+    minCapacityKg: null,
+    minVolumeM3: null,
+    refrigerated: false,
+  };
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return empty;
 
   const data = payload as Record<string, unknown>;
   const vehicle = data.vehicle && typeof data.vehicle === "object" && !Array.isArray(data.vehicle)
@@ -66,6 +75,9 @@ function requirementsFromPayload(payload: unknown): OrderRequirements {
   return {
     vehicleTypes: stringList(data.vehicleTypes ?? data.requiredVehicleTypes ?? vehicle.types ?? vehicle.type),
     vehicleSubtypes: stringList(data.vehicleSubtypes ?? data.requiredVehicleSubtypes ?? vehicle.subtypes ?? vehicle.subtype),
+    providerCategories: stringList(
+      data.providerCategories ?? data.requiredProviderCategories ?? data.providerCategory,
+    ),
     minCapacityKg: positiveNumber(data.weightKg ?? data.loadWeightKg ?? load.weightKg ?? vehicle.minCapacityKg),
     minVolumeM3: positiveNumber(data.volumeM3 ?? data.loadVolumeM3 ?? load.volumeM3 ?? vehicle.minVolumeM3),
     refrigerated: data.refrigerated === true || data.requiresRefrigeration === true || load.refrigerated === true || vehicle.refrigerated === true,
@@ -82,6 +94,11 @@ function matchesRequirement(value: string | null | undefined, allowed: string[])
   return allowed.some((item) => normalize(item) === normalize(value));
 }
 
+function safeDecimal(value: unknown, min: number, max: number, fallback: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+}
+
 export async function findMatches(prisma: PrismaClient, orderId: string): Promise<MatchCandidate[]> {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order || order.pickupLat === null || order.pickupLng === null) return [];
@@ -96,22 +113,39 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
   const nearbyIds = await findNearbyDriverIds(pickupLat, pickupLng, maxRadiusKm);
   if (nearbyIds.length === 0) return [];
 
-  const providers = await prisma.driverProfile.findMany({
+  // A provider is eligible when it has either a live driver profile or a live
+  // service-provider profile. Both use the same GPS/vehicle matching path.
+  const providers = await prisma.user.findMany({
     where: {
-      userId: { in: nearbyIds },
-      isOnline: true,
-      isAvailable: true,
-      user: { status: "ACTIVE" },
+      id: { in: nearbyIds },
+      status: "ACTIVE",
+      role: { in: ["DRIVER", "SERVICE_PROVIDER"] },
+      OR: [
+        { driverProfile: { is: { isOnline: true, isAvailable: true } } },
+        { serviceProvider: { is: { isOnline: true, isAvailable: true } } },
+      ],
     },
-    include: {
-      user: {
+    select: {
+      id: true,
+      role: true,
+      vehicles: {
+        where: { active: true },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true, type: true, subtype: true, capacityKg: true, volumeM3: true, refrigerated: true },
+      },
+      driverProfile: {
         select: {
-          id: true,
-          vehicles: {
-            where: { active: true },
-            orderBy: { updatedAt: "desc" },
-            select: { id: true, type: true, subtype: true, capacityKg: true, volumeM3: true, refrigerated: true },
-          },
+          serviceRadiusKm: true,
+          rating: true,
+          reliabilityScore: true,
+        },
+      },
+      serviceProvider: {
+        select: {
+          category: true,
+          serviceRadiusKm: true,
+          rating: true,
+          reliabilityScore: true,
         },
       },
     },
@@ -120,21 +154,31 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
   const routing = getRoutingProvider();
   const candidates = await Promise.all(
     providers.map(async (provider): Promise<MatchCandidate | null> => {
-      const location = await getDriverLocation(provider.user.id);
+      const location = await getDriverLocation(provider.id);
       if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng) || Math.abs(location.lat) > 90 || Math.abs(location.lng) > 180) return null;
 
       const distanceKm = haversineKm(pickupLat, pickupLng, location.lat, location.lng);
-      const serviceRadiusKm = Number(provider.serviceRadiusKm);
-      if (Number.isFinite(serviceRadiusKm) && serviceRadiusKm > 0 && distanceKm > serviceRadiusKm) return null;
+      const profile = provider.role === "SERVICE_PROVIDER" ? provider.serviceProvider : provider.driverProfile;
+      if (!profile) return null;
 
-      const vehicle = provider.user.vehicles.find((candidate) =>
+      const category = provider.serviceProvider?.category ?? null;
+      const serviceRadiusKm = Number(profile.serviceRadiusKm);
+      if (Number.isFinite(serviceRadiusKm) && serviceRadiusKm > 0 && distanceKm > serviceRadiusKm) return null;
+      if (!matchesRequirement(category, requirements.providerCategories)) return null;
+
+      const vehicle = provider.vehicles.find((candidate) =>
         matchesRequirement(candidate.type, requirements.vehicleTypes)
         && matchesRequirement(candidate.subtype, requirements.vehicleSubtypes)
         && (requirements.minCapacityKg === null || (candidate.capacityKg !== null && Number(candidate.capacityKg) >= requirements.minCapacityKg))
         && (requirements.minVolumeM3 === null || (candidate.volumeM3 !== null && Number(candidate.volumeM3) >= requirements.minVolumeM3))
         && (!requirements.refrigerated || candidate.refrigerated),
       );
-      if (!vehicle && (requirements.vehicleTypes.length > 0 || requirements.vehicleSubtypes.length > 0 || requirements.minCapacityKg !== null || requirements.minVolumeM3 !== null || requirements.refrigerated)) return null;
+      const hasVehicleRequirement = requirements.vehicleTypes.length > 0
+        || requirements.vehicleSubtypes.length > 0
+        || requirements.minCapacityKg !== null
+        || requirements.minVolumeM3 !== null
+        || requirements.refrigerated;
+      if (!vehicle && hasVehicleRequirement) return null;
 
       const route = await routing.route(
         { lat: location.lat, lng: location.lng },
@@ -145,22 +189,22 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
       // Transparent 100-point score: proximity 35, rating 25, reliability 20,
       // ETA 10 and vehicle suitability 10. Hard requirements are filtered above.
       const distanceScore = Math.max(0, 35 * (1 - Math.min(distanceKm, maxRadiusKm) / maxRadiusKm));
-      const rating = Number(provider.rating);
-      const reliability = Number(provider.reliabilityScore);
-      const safeRating = Number.isFinite(rating) ? Math.min(5, Math.max(0, rating)) : 0;
-      const safeReliability = Number.isFinite(reliability) ? Math.min(100, Math.max(0, reliability)) : 0;
-      const ratingScore = safeRating * 5;
-      const reliabilityScore = safeReliability * 0.2;
+      const rating = safeDecimal(profile.rating, 0, 5, 0);
+      const reliability = safeDecimal(profile.reliabilityScore, 0, 100, 0);
+      const ratingScore = rating * 5;
+      const reliabilityScore = reliability * 0.2;
       const etaScore = etaMinutes === null ? 0 : 10 * (1 - Math.min(etaMinutes, 60) / 60);
       const vehicleScore = vehicle ? 10 : 0;
       const score = Math.min(100, Math.max(0, distanceScore + ratingScore + reliabilityScore + etaScore + vehicleScore));
 
       return {
-        providerId: provider.user.id,
+        providerId: provider.id,
+        providerRole: provider.role,
+        providerCategory: category,
         score,
         distanceKm,
-        rating: safeRating,
-        reliabilityScore: safeReliability,
+        rating,
+        reliabilityScore: reliability,
         etaMinutes,
         vehicleId: vehicle?.id ?? null,
         vehicleType: vehicle?.type ?? null,
