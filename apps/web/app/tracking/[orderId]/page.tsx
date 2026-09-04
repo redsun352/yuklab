@@ -7,8 +7,15 @@ import { getOrderTracking, getRoute, getTrackingWsToken, trackingWebSocketUrl, t
 
 const TrackingMap = dynamic(() => import("./TrackingMap"), { ssr: false, loading: () => <div className="tracking-map-loading">Harita yükleniyor…</div> });
 
+const STALE_LOCATION_MS = 60_000;
+
+function locationAgeMs(timestamp: string) {
+  const time = Date.parse(timestamp);
+  return Number.isFinite(time) ? Math.max(0, Date.now() - time) : Number.POSITIVE_INFINITY;
+}
 function ageText(timestamp: string) {
-  const seconds = Math.max(0, Math.round((Date.now() - new Date(timestamp).getTime()) / 1000));
+  const seconds = Math.floor(locationAgeMs(timestamp) / 1000);
+  if (!Number.isFinite(seconds)) return "Geçersiz zaman";
   if (seconds < 10) return "Az önce";
   if (seconds < 60) return `${seconds} sn önce`;
   return `${Math.round(seconds / 60)} dk önce`;
@@ -17,6 +24,11 @@ function formatDistance(meters: number) { return meters < 1000 ? `${Math.round(m
 function formatDuration(seconds: number) {
   const minutes = Math.max(1, Math.round(seconds / 60));
   return minutes < 60 ? `${minutes} dk` : `${Math.floor(minutes / 60)} sa ${minutes % 60} dk`;
+}
+function validPoint(lat: string | number | null | undefined, lng: string | number | null | undefined): RoutePoint | null {
+  if (lat === null || lat === undefined || lng === null || lng === undefined) return null;
+  const point = { lat: Number(lat), lng: Number(lng) };
+  return Number.isFinite(point.lat) && Number.isFinite(point.lng) && Math.abs(point.lat) <= 90 && Math.abs(point.lng) <= 180 ? point : null;
 }
 
 export default function TrackingPage({ params }: { params: Promise<{ orderId: string }> }) {
@@ -29,6 +41,7 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
   const [routeSource, setRouteSource] = useState<"provider" | "fallback" | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [ageTick, setAgeTick] = useState(0);
   const [realtime, setRealtime] = useState<"connecting" | "connected" | "polling">("connecting");
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -39,6 +52,11 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
   }, [params]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setAgeTick((value) => value + 1), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (!orderId) return;
     const accessToken = window.localStorage.getItem("yuklab_access_token") ?? "";
     setToken(accessToken);
@@ -47,13 +65,11 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
     let routeTimer: number | undefined;
 
     const updateRoute = async (current: TrackingData) => {
-      const destination = current.order?.deliveryLat && current.order.deliveryLng
-        ? { lat: Number(current.order.deliveryLat), lng: Number(current.order.deliveryLng) }
-        : null;
-      if (!destination || !Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) {
+      const destination = validPoint(current.order?.deliveryLat, current.order?.deliveryLng);
+      const from = validPoint(current.location.lat, current.location.lng);
+      if (!destination || !from) {
         setRoute([]); setRouteDistance(null); setRouteDuration(null); setRouteSource(null); return;
       }
-      const from = { lat: current.location.lat, lng: current.location.lng };
       try {
         const result = await getRoute(accessToken, from, destination);
         if (cancelled) return;
@@ -62,7 +78,7 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
         setRouteDuration(result.durationSeconds);
         setRouteSource(result.source);
       } catch {
-        if (!cancelled) setRoute([from, destination]);
+        if (!cancelled) { setRoute([from, destination]); setRouteDistance(null); setRouteDuration(null); setRouteSource("fallback"); }
       }
     };
 
@@ -78,9 +94,13 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
     }
 
     const applyRealtimeLocation = (next: TrackingData["location"]) => {
+      if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng) || Math.abs(next.lat) > 90 || Math.abs(next.lng) > 180) return;
       setData((current) => current ? { ...current, location: next } : { location: next });
       if (!routeTimer) {
-        routeTimer = window.setTimeout(() => { routeTimer = undefined; void getOrderTracking(accessToken, orderId).then(updateRoute).catch(() => undefined); }, 30000);
+        routeTimer = window.setTimeout(() => {
+          routeTimer = undefined;
+          void getOrderTracking(accessToken, orderId).then(updateRoute).catch(() => undefined);
+        }, 30000);
       }
     };
 
@@ -124,20 +144,23 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
 
   const location = data?.location;
   const order = data?.order;
-  const pickup = order?.pickupLat && order.pickupLng ? { lat: Number(order.pickupLat), lng: Number(order.pickupLng) } : null;
-  const delivery = order?.deliveryLat && order.deliveryLng ? { lat: Number(order.deliveryLat), lng: Number(order.deliveryLng) } : null;
+  const pickup = validPoint(order?.pickupLat, order?.pickupLng);
+  const delivery = validPoint(order?.deliveryLat, order?.deliveryLng);
+  const stale = location ? locationAgeMs(location.timestamp) > STALE_LOCATION_MS : false;
   const mapPoints = location ? [
-    { lat: location.lat, lng: location.lng, label: "Sürücü · canlı konum" },
-    ...(pickup && Number.isFinite(pickup.lat) && Number.isFinite(pickup.lng) ? [{ ...pickup, label: "A · Alış noktası" }] : []),
-    ...(delivery && Number.isFinite(delivery.lat) && Number.isFinite(delivery.lng) ? [{ ...delivery, label: "B · Teslimat noktası" }] : []),
+    { lat: location.lat, lng: location.lng, label: stale ? "Sürücü · eski konum" : "Sürücü · canlı konum" },
+    ...(pickup ? [{ ...pickup, label: "A · Alış noktası" }] : []),
+    ...(delivery ? [{ ...delivery, label: "B · Teslimat noktası" }] : []),
   ] : [];
-  const googleDestination = delivery ?? location;
+  const googleDestination = delivery ?? validPoint(location?.lat, location?.lng);
   const realtimeLabel = realtime === "connected" ? "WebSocket canlı" : realtime === "polling" ? "Yedek bağlantı" : "Bağlanıyor…";
+  void ageTick;
 
   return <main className="dashboard">
     <header className="dashboard-header"><div><p className="eyebrow">YÜKLAB · LIVE TRACKING</p><h1>Sürücü konumu</h1><p className="lead">Siparişin için canlı GPS, rota, mesafe ve tahmini varış süresini takip et.</p></div><Link className="nav-link" href="/orders">Siparişlerim →</Link></header>
     {!token ? <div className="notice error">Takibi görmek için giriş yapmalısın.</div> : <section className="tracking-panel">
-      <div className="tracking-status"><span className="live-dot" /><strong>{location ? "Canlı konum alınıyor" : "Konum bekleniyor"}</strong><span>{realtimeLabel}</span>{location && <span>{ageText(location.timestamp)}</span>}</div>
+      <div className={`tracking-status${stale ? " tracking-status-stale" : ""}`}><span className="live-dot" /><strong>{stale ? "Konum güncel değil" : location ? "Canlı konum alınıyor" : "Konum bekleniyor"}</strong><span>{realtimeLabel}</span>{location && <span>{ageText(location.timestamp)}</span>}</div>
+      {stale && <div className="notice tracking-stale-notice">Sürücünün son konumu 1 dakikadan eski. Yeni GPS verisi gelene kadar haritadaki konum yaklaşık kabul edilmelidir.</div>}
       {loading && !location ? <div className="empty">Konum sorgulanıyor…</div> : location ? <>
         <div className="tracking-coordinates"><div><span>Enlem</span><strong>{location.lat.toFixed(6)}</strong></div><div><span>Boylam</span><strong>{location.lng.toFixed(6)}</strong></div><div><span>Doğruluk</span><strong>{location.accuracyM !== undefined ? `±${location.accuracyM.toFixed(0)} m` : "—"}</strong></div><div><span>Hız</span><strong>{location.speedKph !== undefined ? `${location.speedKph.toFixed(0)} km/sa` : "—"}</strong></div></div>
         <div className="tracking-route-stats"><div><span>Varış mesafesi</span><strong>{routeDistance !== null ? formatDistance(routeDistance) : "—"}</strong></div><div><span>Tahmini varış</span><strong>{routeDuration !== null ? formatDuration(routeDuration) : "—"}</strong></div><div><span>Rota</span><strong>{routeSource === "provider" ? "Yol ağı" : routeSource === "fallback" ? "Yaklaşık" : "Bekleniyor"}</strong></div></div>
