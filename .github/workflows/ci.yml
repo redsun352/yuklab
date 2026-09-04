@@ -16,7 +16,7 @@ concurrency:
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/yuklab?schema=public
   REDIS_URL: redis://localhost:6379
-  JWT_SECRET: 01234567890123456789012345678901
+  JWT_SECRET: "01234567890123456789012345678901"
   CORS_ORIGIN: http://localhost:3000
   NODE_ENV: test
 
