@@ -6,9 +6,26 @@ export function datetimeLocalToIso(value: string, timeZoneOffsetMinutes = new Da
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed);
   if (!match) return undefined;
 
-  const [, year, month, day, hour, minute, second = "00"] = match;
-  const localAsUtc = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
-  if (!Number.isFinite(localAsUtc)) return undefined;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText = "00"] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return undefined;
+
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const calendarCheck = new Date(localAsUtc);
+  if (
+    calendarCheck.getUTCFullYear() !== year ||
+    calendarCheck.getUTCMonth() !== month - 1 ||
+    calendarCheck.getUTCDate() !== day ||
+    calendarCheck.getUTCHours() !== hour ||
+    calendarCheck.getUTCMinutes() !== minute ||
+    calendarCheck.getUTCSeconds() !== second
+  ) return undefined;
 
   const date = new Date(localAsUtc + timeZoneOffsetMinutes * 60_000);
   if (Number.isNaN(date.getTime())) return undefined;
