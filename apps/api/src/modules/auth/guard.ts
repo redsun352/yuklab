@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { UserRole } from "@yuklab/database";
 import { jwtVerify } from "jose";
 
 function secret() {
@@ -7,13 +8,20 @@ function secret() {
   return new TextEncoder().encode(value);
 }
 
+function parseRole(value: unknown): UserRole {
+  if (typeof value === "string" && Object.values(UserRole).includes(value as UserRole)) {
+    return value as UserRole;
+  }
+  return UserRole.CUSTOMER;
+}
+
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
   const header = request.headers.authorization;
   if (!header?.startsWith("Bearer ")) return reply.code(401).send({ error: "UNAUTHORIZED" });
   try {
     const { payload } = await jwtVerify(header.slice(7), secret());
     if (!payload.sub) return reply.code(401).send({ error: "INVALID_ACCESS_TOKEN" });
-    request.user = { id: payload.sub, role: String(payload.role ?? "CUSTOMER") };
+    request.user = { id: payload.sub, role: parseRole(payload.role) };
   } catch {
     return reply.code(401).send({ error: "INVALID_ACCESS_TOKEN" });
   }
