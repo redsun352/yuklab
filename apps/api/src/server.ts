@@ -14,6 +14,7 @@ import { trackingRealtimeRoutes } from "./modules/tracking/realtime";
 import { trackingWsTokenRoutes } from "./modules/tracking/ws-token";
 import { vehicleRoutes } from "./modules/vehicles/routes";
 import { routingRoutes } from "./modules/routing/routes";
+import { prisma } from "./lib/prisma";
 
 export function buildApp() {
   const app = Fastify({ logger: true, bodyLimit: 1024 * 1024 });
@@ -21,6 +22,10 @@ export function buildApp() {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+
+  if (allowedOrigins.some((origin) => origin === "*")) {
+    throw new Error("CORS_ORIGIN must not contain '*' when credentials are enabled");
+  }
 
   app.register(cors, {
     origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
@@ -36,9 +41,20 @@ export function buildApp() {
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "no-referrer");
     reply.header("Permissions-Policy", "geolocation=(self), camera=(), microphone=()");
+    if (process.env.NODE_ENV === "production") {
+      reply.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
   });
   app.register(websocket);
   app.get("/health", async () => ({ status: "ok", service: "yuklab-api", version: "0.1.0" }));
+  app.get("/ready", async (_request, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return { status: "ready", service: "yuklab-api" };
+    } catch {
+      return reply.code(503).send({ status: "not_ready", service: "yuklab-api" });
+    }
+  });
   app.register(authRoutes);
   app.register(userRoutes);
   app.register(orderRoutes);
@@ -59,6 +75,20 @@ if (process.env.NODE_ENV !== "test") {
   const app = buildApp();
   const port = Number(process.env.PORT ?? 3001);
   const host = process.env.HOST ?? "0.0.0.0";
+  const shutdown = async (signal: string) => {
+    app.log.info({ signal }, "shutting down");
+    try {
+      await app.close();
+      await prisma.$disconnect();
+      process.exit(0);
+    } catch (error) {
+      app.log.error(error, "graceful shutdown failed");
+      process.exit(1);
+    }
+  };
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
+
   app.listen({ port, host }).catch((error) => {
     app.log.error(error);
     process.exit(1);
