@@ -7,8 +7,11 @@ describe("order input utilities", () => {
     expect(datetimeLocalToIso("2026-09-04T16:30", 0)).toBe("2026-09-04T16:30:00.000Z");
   });
 
-  it("rejects malformed datetime values", () => {
+  it("rejects malformed and impossible datetime values", () => {
     expect(datetimeLocalToIso("2026/09/04 16:30", -180)).toBeUndefined();
+    expect(datetimeLocalToIso("2026-02-30T16:30", -180)).toBeUndefined();
+    expect(datetimeLocalToIso("2026-09-04T24:00", -180)).toBeUndefined();
+    expect(datetimeLocalToIso("2026-09-04T16:60", -180)).toBeUndefined();
     expect(datetimeLocalToIso("", -180)).toBeUndefined();
   });
 
