@@ -31,6 +31,12 @@ export function buildApp() {
     max: 120,
     timeWindow: "1 minute",
   });
+  app.addHook("onSend", async (_request, reply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header("Permissions-Policy", "geolocation=(self), camera=(), microphone=()");
+  });
   app.register(websocket);
   app.get("/health", async () => ({ status: "ok", service: "yuklab-api", version: "0.1.0" }));
   app.register(authRoutes);
