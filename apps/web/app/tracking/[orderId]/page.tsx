@@ -31,7 +31,6 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
   const [loading, setLoading] = useState(true);
   const [realtime, setRealtime] = useState<"connecting" | "connected" | "polling">("connecting");
   const socketRef = useRef<WebSocket | null>(null);
-  const routePointRef = useRef<RoutePoint | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,7 +54,6 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
         setRoute([]); setRouteDistance(null); setRouteDuration(null); setRouteSource(null); return;
       }
       const from = { lat: current.location.lat, lng: current.location.lng };
-      routePointRef.current = from;
       try {
         const result = await getRoute(accessToken, from, destination);
         if (cancelled) return;
