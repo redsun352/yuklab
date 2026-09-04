@@ -27,11 +27,12 @@ export function routingRoutes(app: FastifyInstance) {
       if (providerResult) return { ...providerResult, source: "provider" as const };
 
       const distanceMeters = haversineMeters(from, to);
-      const averageSpeedKph = Number(process.env.ROUTING_FALLBACK_SPEED_KPH ?? 50);
-      const speedMps = Math.max(averageSpeedKph, 1) / 3.6;
+      const configuredSpeed = Number(process.env.ROUTING_FALLBACK_SPEED_KPH ?? 50);
+      const averageSpeedKph = Number.isFinite(configuredSpeed) && configuredSpeed > 0 ? Math.min(configuredSpeed, 200) : 50;
+      const speedMps = averageSpeedKph / 3.6;
       return {
         distanceMeters: Math.round(distanceMeters),
-        durationSeconds: Math.round(distanceMeters / speedMps),
+        durationSeconds: Math.max(1, Math.round(distanceMeters / speedMps)),
         source: "fallback" as const,
         geometry: [from, to],
       };
