@@ -108,7 +108,7 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
         </div>
         <TrackingMap points={mapPoints} route={route.map((point) => ({ ...point, label: "" }))} />
         <div className="tracking-route"><div><span className="route-marker pickup">A</span><div><strong>Alış noktası</strong><small>{order?.pickupAddress ?? "Konum bilgisi yok"}</small></div></div><div className="route-line" /><div><span className="route-marker delivery">B</span><div><strong>Teslimat noktası</strong><small>{order?.deliveryAddress ?? "Belirtilmemiş"}</small></div></div></div>
-        {googleDestination && <a className="tracking-button" href={`https://www.google.com/maps/dir/?api=1&destination=${googleDestination.lat},${googleDestination.lng}`} target="_blank" rel="noreferrer">Rotayı Google Maps'te aç →</a>}
+        {googleDestination && <a className="tracking-button" href={`https://www.google.com/maps/dir/?api=1&destination=${googleDestination.lat},${googleDestination.lng}`} target="_blank" rel="noreferrer">Rotayı Google Maps&apos;te aç →</a>}
       </> : <div className="empty">{message || "Sürücü henüz konum paylaşmadı."}</div>}
       {message && location && <div className="notice">{message}</div>}
       <p className="tracking-refresh">Otomatik yenileme: 10 saniye · Durum: {order?.status ?? "—"}</p>
