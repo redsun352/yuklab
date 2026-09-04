@@ -1,5 +1,4 @@
-import type { PrismaClient } from "@yuklab/database";
-import type { OrderStatus, UserRole } from "@prisma/client";
+import type { PrismaClient, OrderStatus, UserRole } from "@yuklab/database";
 
 export const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> = {
   DRAFT: ["PUBLISHED", "CANCELLED"],
