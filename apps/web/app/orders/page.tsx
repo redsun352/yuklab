@@ -17,7 +17,7 @@ export default function OrdersPage(){
  const [token,setToken]=useState(""),[orders,setOrders]=useState<Order[]>([]),[offers,setOffers]=useState<Record<string,Offer[]>>({}),[matches,setMatches]=useState<Record<string,Match[]>>({}),[busy,setBusy]=useState(""),[loadingMatches,setLoadingMatches]=useState(""),[message,setMessage]=useState("");
  const socketsRef=useRef<Map<string,WebSocket>>(new Map());
  async function load(t:string){const r=await listOrders(t);setOrders(r.orders);const entries=await Promise.all(r.orders.map(async o=>[o.id,(await listOrderOffers(t,o.id)).offers] as const));setOffers(Object.fromEntries(entries));}
- useEffect(()=>{const t=window.localStorage.getItem("yuklab_access_token")??"";setToken(t);if(!t)return;void load(t).catch(e=>setMessage(e instanceof Error?e.message:"Siparişler alınamadı."));const refresh=window.setInterval(()=>{void load(t).catch(()=>undefined);},15000);return()=>{window.clearInterval(refresh);const sockets=socketsRef.current;for(const socket of sockets.values())socket.close();sockets.clear();};},[]);
+ useEffect(()=>{const t=window.localStorage.getItem("yuklab_access_token")??"";setToken(t);if(!t)return;void load(t).catch(e=>setMessage(e instanceof Error?e.message:"Siparişler alınamadı."));const refresh=window.setInterval(()=>{void load(t).catch(()=>undefined);},15000);const sockets=socketsRef.current;return()=>{window.clearInterval(refresh);for(const socket of sockets.values())socket.close();sockets.clear();};},[]);
  useEffect(()=>{
    if(!token)return;
    const active=new Set(orders.filter(o=>o.assignedDriverId&&!terminalStatuses.has(o.status)).map(o=>o.id));
