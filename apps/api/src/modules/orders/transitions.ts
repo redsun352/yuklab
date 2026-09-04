@@ -1,4 +1,5 @@
 import type { PrismaClient, OrderStatus, UserRole } from "@yuklab/database";
+import { publishOrderStatus } from "../tracking/realtime";
 
 export const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> = {
   DRAFT: ["PUBLISHED", "CANCELLED"],
@@ -44,9 +45,7 @@ export function canActorTransition(
 ): boolean {
   if (!canTransition(from, to)) return false;
   if (role === "ADMIN" || role === "SUPER_ADMIN") return true;
-  if (to === "CANCELLED") {
-    return actorId === customerId || actorId === assignedDriverId;
-  }
+  if (to === "CANCELLED") return actorId === customerId || actorId === assignedDriverId;
   if (PROVIDER_STATUSES.has(to)) {
     return actorId === assignedDriverId && (role === "DRIVER" || role === "SERVICE_PROVIDER");
   }
@@ -63,34 +62,17 @@ export async function transitionOrder(
     metadata?: Record<string, unknown>;
   },
 ) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
       where: { id: input.orderId },
-      select: {
-        id: true,
-        customerId: true,
-        assignedDriverId: true,
-        status: true,
-      },
+      select: { id: true, customerId: true, assignedDriverId: true, status: true },
     });
-
     if (!order) throw new Error("ORDER_NOT_FOUND");
-    if (!canActorTransition(
-      input.actorRole,
-      input.actorId,
-      order.customerId,
-      order.assignedDriverId,
-      order.status,
-      input.to,
-    )) {
+    if (!canActorTransition(input.actorRole, input.actorId, order.customerId, order.assignedDriverId, order.status, input.to)) {
       throw new Error("INVALID_ORDER_TRANSITION");
     }
 
-    const updated = await tx.order.updateMany({
-      where: { id: order.id, status: order.status },
-      data: { status: input.to },
-    });
-
+    const updated = await tx.order.updateMany({ where: { id: order.id, status: order.status }, data: { status: input.to } });
     if (updated.count !== 1) throw new Error("ORDER_STATE_RACE");
 
     await tx.trackingEvent.create({
@@ -98,14 +80,9 @@ export async function transitionOrder(
         orderId: order.id,
         actorId: input.actorId,
         eventType: `ORDER_STATUS_${input.to}`,
-        metadata: {
-          from: order.status,
-          to: input.to,
-          ...(input.metadata ?? {}),
-        },
+        metadata: { from: order.status, to: input.to, ...(input.metadata ?? {}) },
       },
     });
-
     await tx.auditLog.create({
       data: {
         actorId: input.actorId,
@@ -115,7 +92,9 @@ export async function transitionOrder(
         metadata: { from: order.status, to: input.to },
       },
     });
-
     return { ...order, status: input.to };
   });
+
+  publishOrderStatus(input.orderId, result.status === input.to ? "UNKNOWN" : String(result.status), input.to);
+  return result;
 }
