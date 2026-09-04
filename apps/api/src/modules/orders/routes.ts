@@ -31,8 +31,7 @@ export async function orderRoutes(app: FastifyInstance) {
       }
 
       const urgency = Math.max(0, Math.min(100, Math.trunc(body.urgency ?? 0)));
-      const budgetMinor =
-        body.budgetMinor === undefined ? undefined : BigInt(body.budgetMinor);
+      const budgetMinor = body.budgetMinor === undefined ? undefined : BigInt(body.budgetMinor);
 
       const order = await prisma.order.create({
         data: {
@@ -80,14 +79,20 @@ export async function orderRoutes(app: FastifyInstance) {
       take: 50,
       select: {
         id: true,
+        assignedDriverId: true,
         serviceType: true,
         status: true,
         pickupAddress: true,
         deliveryAddress: true,
+        pickupLat: true,
+        pickupLng: true,
+        deliveryLat: true,
+        deliveryLng: true,
         scheduledAt: true,
         budgetMinor: true,
         currency: true,
         urgency: true,
+        payload: true,
         createdAt: true,
       },
     });
@@ -100,25 +105,17 @@ export async function orderRoutes(app: FastifyInstance) {
     { preHandler: requireAuth },
     async (request, reply) => {
       const order = await prisma.order.findFirst({
-        where: {
-          id: request.params.id,
-          customerId: request.user!.id,
-        },
+        where: { id: request.params.id, customerId: request.user!.id },
       });
 
-      if (!order) {
-        return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
-      }
-
+      if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
       return { order: serializeBigInt(order) };
     },
   );
 }
 
 function serializeBigInt<T>(value: T): T {
-  return JSON.parse(
-    JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v)),
-  ) as T;
+  return JSON.parse(JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v))) as T;
 }
 
 void ORDER_STATUSES;
