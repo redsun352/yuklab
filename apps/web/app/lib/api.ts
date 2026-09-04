@@ -38,6 +38,7 @@ export async function listOrders(accessToken: string) { return request<{ orders:
 export async function listOrderOffers(accessToken: string, orderId: string) { return request<{ offers: Offer[] }>(`/v1/orders/${orderId}/offers`, auth(accessToken)); }
 export async function listOrderMatches(accessToken: string, orderId: string) { return request<{ matches: Match[] }>(`/v1/orders/${orderId}/matches`, auth(accessToken)); }
 export async function acceptOffer(accessToken: string, orderId: string, offerId: string) { return request<{ order: Order; offer: Offer }>(`/v1/orders/${orderId}/offers/${offerId}/accept`, { ...auth(accessToken), method: "POST" }); }
+export async function transitionOrder(accessToken: string, orderId: string, status: string, metadata?: Record<string, unknown>) { return request<{ order: Order }>(`/v1/orders/${orderId}/status`, { ...auth(accessToken), method: "POST", body: JSON.stringify({ status, metadata }) }); }
 export async function listProviderOrders(accessToken: string) { return request<{ orders: Order[] }>("/v1/provider/orders", auth(accessToken)); }
 export async function listProviderOffers(accessToken: string) { return request<{ offers: Offer[] }>("/v1/provider/offers", auth(accessToken)); }
 export async function createOffer(accessToken: string, orderId: string, input: { amountMinor: number; etaMinutes?: number; note?: string }) { return request<{ offer: Offer }>(`/v1/orders/${orderId}/offers`, { ...auth(accessToken), method: "POST", body: JSON.stringify(input) }); }
