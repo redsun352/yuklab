@@ -1,4 +1,5 @@
-import type { PrismaClient, OrderStatus, UserRole } from "@yuklab/database";
+import type { PrismaClient } from "@yuklab/database";
+import type { OrderStatus, UserRole } from "@prisma/client";
 
 export const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> = {
   DRAFT: ["PUBLISHED", "CANCELLED"],
@@ -74,9 +75,7 @@ export async function transitionOrder(
       },
     });
 
-    if (!order) {
-      throw new Error("ORDER_NOT_FOUND");
-    }
+    if (!order) throw new Error("ORDER_NOT_FOUND");
     if (!canActorTransition(
       input.actorRole,
       input.actorId,
@@ -93,9 +92,7 @@ export async function transitionOrder(
       data: { status: input.to },
     });
 
-    if (updated.count !== 1) {
-      throw new Error("ORDER_STATE_RACE");
-    }
+    if (updated.count !== 1) throw new Error("ORDER_STATE_RACE");
 
     await tx.trackingEvent.create({
       data: {
