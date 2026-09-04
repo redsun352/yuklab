@@ -21,7 +21,7 @@ type OrderCreateBody = {
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const MAX_ADDRESS_LENGTH = 500;
 const MAX_SERVICE_TYPE_LENGTH = 80;
-const MAX_CURRENCY_LENGTH = 3;
+const MAX_BUDGET_MINOR = 9223372036854775807n;
 
 export async function orderRoutes(app: FastifyInstance) {
   app.post<{ Body: OrderCreateBody }>(
@@ -33,7 +33,7 @@ export async function orderRoutes(app: FastifyInstance) {
       const pickupAddress = body.pickupAddress?.trim();
       const deliveryAddress = body.deliveryAddress?.trim();
 
-      if (!serviceType || !pickupAddress || serviceType.length > MAX_SERVICE_TYPE_LENGTH || pickupAddress.length > MAX_ADDRESS_LENGTH || deliveryAddress && deliveryAddress.length > MAX_ADDRESS_LENGTH) {
+      if (!serviceType || !pickupAddress || serviceType.length > MAX_SERVICE_TYPE_LENGTH || pickupAddress.length > MAX_ADDRESS_LENGTH || (deliveryAddress !== undefined && deliveryAddress.length > MAX_ADDRESS_LENGTH)) {
         return reply.code(400).send({ error: "INVALID_INPUT" });
       }
 
@@ -46,7 +46,7 @@ export async function orderRoutes(app: FastifyInstance) {
       }
 
       const currency = (body.currency ?? "TRY").trim().toUpperCase();
-      if (currency.length !== MAX_CURRENCY_LENGTH || !CURRENCY_RE.test(currency)) {
+      if (!CURRENCY_RE.test(currency)) {
         return reply.code(400).send({ error: "INVALID_CURRENCY" });
       }
 
@@ -147,11 +147,13 @@ function parseBudgetMinor(value: string | number | undefined): bigint | null {
   if (value === undefined) return null;
   if (typeof value === "number") {
     if (!Number.isSafeInteger(value) || value < 0) return null;
-    return BigInt(value);
+    const parsed = BigInt(value);
+    return parsed <= MAX_BUDGET_MINOR ? parsed : null;
   }
   if (!/^\d+$/.test(value)) return null;
   try {
-    return BigInt(value);
+    const parsed = BigInt(value);
+    return parsed <= MAX_BUDGET_MINOR ? parsed : null;
   } catch {
     return null;
   }
