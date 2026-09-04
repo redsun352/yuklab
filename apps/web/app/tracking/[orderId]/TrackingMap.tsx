@@ -7,6 +7,8 @@ import { useEffect } from "react";
 
 export type TrackingMapPoint = { lat: number; lng: number; label: string };
 
+type LatLngTuple = [number, number];
+
 function FitBounds({ points }: { points: TrackingMapPoint[] }) {
   const map = useMap();
   useEffect(() => {
@@ -15,14 +17,15 @@ function FitBounds({ points }: { points: TrackingMapPoint[] }) {
       map.setView([points[0].lat, points[0].lng], 15, { animate: true });
       return;
     }
-    map.fitBounds(points.map((point) => [point.lat, point.lng] as LatLngExpression), { padding: [32, 32], maxZoom: 15, animate: true });
+    const bounds = points.map((point): LatLngTuple => [point.lat, point.lng]);
+    map.fitBounds(bounds, { padding: [32, 32], maxZoom: 15, animate: true });
   }, [map, points]);
   return null;
 }
 
 export default function TrackingMap({ points, route }: { points: TrackingMapPoint[]; route: TrackingMapPoint[] }) {
   const center = points[0] ? [points[0].lat, points[0].lng] as LatLngExpression : [39.0, 35.0] as LatLngExpression;
-  const routePositions = route.map((point) => [point.lat, point.lng] as LatLngExpression);
+  const routePositions = route.map((point): LatLngTuple => [point.lat, point.lng]);
 
   return (
     <div className="tracking-map-leaflet">
