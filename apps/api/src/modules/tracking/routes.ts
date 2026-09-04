@@ -6,7 +6,7 @@ import { publishOrderLocation } from "./realtime";
 
 const MAX_LOCATION_AGE_MS = 5 * 60 * 1000;
 const MAX_LOCATION_FUTURE_MS = 60 * 1000;
-const TERMINAL_ORDER_STATUSES = ["CANCELLED", "EXPIRED", "FAILED", "COMPLETED", "DISPUTED"] as const;
+const TERMINAL_ORDER_STATUSES = ["CANCELLED", "EXPIRED", "FAILED", "COMPLETED", "DISPUTED"];
 
 export async function trackingRoutes(app: FastifyInstance) {
   app.post<{
@@ -55,7 +55,7 @@ export async function trackingRoutes(app: FastifyInstance) {
     });
     if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
     if (!order.assignedDriverId) return reply.code(404).send({ error: "DRIVER_NOT_ASSIGNED" });
-    if (TERMINAL_ORDER_STATUSES.includes(order.status as (typeof TERMINAL_ORDER_STATUSES)[number])) return reply.code(409).send({ error: "TRACKING_NOT_ACTIVE" });
+    if (TERMINAL_ORDER_STATUSES.includes(order.status)) return reply.code(409).send({ error: "TRACKING_NOT_ACTIVE" });
     const location = await getDriverLocation(order.assignedDriverId);
     if (!location) return reply.code(404).send({ error: "LOCATION_NOT_AVAILABLE" });
     return {
