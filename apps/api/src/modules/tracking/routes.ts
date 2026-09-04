@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { OrderStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
 import { getDriverLocation, setDriverLocation } from "./state";
@@ -6,7 +7,7 @@ import { publishOrderLocation } from "./realtime";
 
 const MAX_LOCATION_AGE_MS = 5 * 60 * 1000;
 const MAX_LOCATION_FUTURE_MS = 60 * 1000;
-const TERMINAL_ORDER_STATUSES = ["CANCELLED", "EXPIRED", "FAILED", "COMPLETED", "DISPUTED"];
+const TERMINAL_ORDER_STATUSES: OrderStatus[] = [OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.FAILED, OrderStatus.COMPLETED, OrderStatus.DISPUTED];
 
 export async function trackingRoutes(app: FastifyInstance) {
   app.post<{
@@ -38,7 +39,7 @@ export async function trackingRoutes(app: FastifyInstance) {
     const isAdmin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
     if (!isAdmin && user.id !== request.params.driverId) {
       const relatedOrder = await prisma.order.findFirst({
-        where: { assignedDriverId: request.params.driverId, customerId: user.id, status: { notIn: ["DRAFT", ...TERMINAL_ORDER_STATUSES] } },
+        where: { assignedDriverId: request.params.driverId, customerId: user.id, status: { notIn: [OrderStatus.DRAFT, ...TERMINAL_ORDER_STATUSES] } },
         select: { id: true },
       });
       if (!relatedOrder) return reply.code(403).send({ error: "FORBIDDEN" });
