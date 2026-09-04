@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { getOrderTracking, getRoute, type RoutePoint, type TrackingData } from "../../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { getOrderTracking, getRoute, getTrackingWsToken, trackingWebSocketUrl, type RoutePoint, type TrackingData } from "../../lib/api";
 
 const TrackingMap = dynamic(() => import("./TrackingMap"), { ssr: false, loading: () => <div className="tracking-map-loading">Harita yükleniyor…</div> });
 
@@ -13,15 +13,10 @@ function ageText(timestamp: string) {
   if (seconds < 60) return `${seconds} sn önce`;
   return `${Math.round(seconds / 60)} dk önce`;
 }
-
-function formatDistance(meters: number) {
-  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
-}
-
+function formatDistance(meters: number) { return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`; }
 function formatDuration(seconds: number) {
   const minutes = Math.max(1, Math.round(seconds / 60));
-  if (minutes < 60) return `${minutes} dk`;
-  return `${Math.floor(minutes / 60)} sa ${minutes % 60} dk`;
+  return minutes < 60 ? `${minutes} dk` : `${Math.floor(minutes / 60)} sa ${minutes % 60} dk`;
 }
 
 export default function TrackingPage({ params }: { params: Promise<{ orderId: string }> }) {
@@ -34,6 +29,9 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
   const [routeSource, setRouteSource] = useState<"provider" | "fallback" | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [realtime, setRealtime] = useState<"connecting" | "connected" | "polling">("connecting");
+  const socketRef = useRef<WebSocket | null>(null);
+  const routePointRef = useRef<RoutePoint | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,41 +45,83 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
     setToken(accessToken);
     if (!accessToken) { setLoading(false); return; }
     let cancelled = false;
+    let routeTimer: number | undefined;
+
+    const updateRoute = async (current: TrackingData) => {
+      const destination = current.order?.deliveryLat && current.order.deliveryLng
+        ? { lat: Number(current.order.deliveryLat), lng: Number(current.order.deliveryLng) }
+        : null;
+      if (!destination || !Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) {
+        setRoute([]); setRouteDistance(null); setRouteDuration(null); setRouteSource(null); return;
+      }
+      const from = { lat: current.location.lat, lng: current.location.lng };
+      routePointRef.current = from;
+      try {
+        const result = await getRoute(accessToken, from, destination);
+        if (cancelled) return;
+        setRoute(result.geometry ?? [from, destination]);
+        setRouteDistance(result.distanceMeters);
+        setRouteDuration(result.durationSeconds);
+        setRouteSource(result.source);
+      } catch {
+        if (!cancelled) setRoute([from, destination]);
+      }
+    };
 
     async function load() {
       try {
         const result = await getOrderTracking(accessToken, orderId);
         if (cancelled) return;
-        setData(result);
-        setMessage("");
-
-        const destination = result.order?.deliveryLat && result.order.deliveryLng
-          ? { lat: Number(result.order.deliveryLat), lng: Number(result.order.deliveryLng) }
-          : null;
-        if (destination && Number.isFinite(destination.lat) && Number.isFinite(destination.lng)) {
-          const routeResult = await getRoute(accessToken, { lat: result.location.lat, lng: result.location.lng }, destination);
-          if (!cancelled) {
-            setRoute(routeResult.geometry ?? [{ lat: result.location.lat, lng: result.location.lng }, destination]);
-            setRouteDistance(routeResult.distanceMeters);
-            setRouteDuration(routeResult.durationSeconds);
-            setRouteSource(routeResult.source);
-          }
-        } else if (!cancelled) {
-          setRoute([]);
-          setRouteDistance(null);
-          setRouteDuration(null);
-          setRouteSource(null);
-        }
+        setData(result); setMessage(""); setLoading(false);
+        await updateRoute(result);
       } catch (error) {
-        if (!cancelled) setMessage(error instanceof Error ? error.message : "Konum alınamadı.");
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setMessage(error instanceof Error ? error.message : "Konum alınamadı."); setLoading(false); }
       }
     }
 
+    const applyRealtimeLocation = (next: TrackingData["location"]) => {
+      setData((current) => current ? { ...current, location: next } : { location: next });
+      if (!routeTimer) {
+        routeTimer = window.setTimeout(() => { routeTimer = undefined; void getOrderTracking(accessToken, orderId).then(updateRoute).catch(() => undefined); }, 30000);
+      }
+    };
+
+    let reconnectTimer: number | undefined;
+    let stopped = false;
+    const connect = async () => {
+      if (stopped) return;
+      try {
+        const { token: wsToken } = await getTrackingWsToken(accessToken, orderId);
+        if (stopped) return;
+        const socket = new WebSocket(trackingWebSocketUrl(orderId), [`yuklab-token.${wsToken}`]);
+        socketRef.current = socket;
+        socket.onopen = () => { setRealtime("connected"); setMessage(""); };
+        socket.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data) as { type?: string; location?: TrackingData["location"] };
+            if (payload.type === "driver.location" && payload.location) applyRealtimeLocation(payload.location);
+          } catch { /* Ignore malformed realtime messages. */ }
+        };
+        socket.onerror = () => { setRealtime("polling"); };
+        socket.onclose = () => {
+          socketRef.current = null;
+          if (!stopped) { setRealtime("polling"); reconnectTimer = window.setTimeout(() => void connect(), 5000); }
+        };
+      } catch {
+        setRealtime("polling");
+        reconnectTimer = window.setTimeout(() => void connect(), 10000);
+      }
+    };
+
     void load();
-    const timer = window.setInterval(() => void load(), 10000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    void connect();
+    const pollTimer = window.setInterval(() => void load(), 15000);
+    return () => {
+      cancelled = true; stopped = true; window.clearInterval(pollTimer);
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      if (routeTimer) window.clearTimeout(routeTimer);
+      socketRef.current?.close(); socketRef.current = null;
+    };
   }, [orderId]);
 
   const location = data?.location;
@@ -94,24 +134,21 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
     ...(delivery && Number.isFinite(delivery.lat) && Number.isFinite(delivery.lng) ? [{ ...delivery, label: "B · Teslimat noktası" }] : []),
   ] : [];
   const googleDestination = delivery ?? location;
+  const realtimeLabel = realtime === "connected" ? "WebSocket canlı" : realtime === "polling" ? "Yedek bağlantı" : "Bağlanıyor…";
 
   return <main className="dashboard">
     <header className="dashboard-header"><div><p className="eyebrow">YÜKLAB · LIVE TRACKING</p><h1>Sürücü konumu</h1><p className="lead">Siparişin için canlı GPS, rota, mesafe ve tahmini varış süresini takip et.</p></div><Link className="nav-link" href="/orders">Siparişlerim →</Link></header>
     {!token ? <div className="notice error">Takibi görmek için giriş yapmalısın.</div> : <section className="tracking-panel">
-      <div className="tracking-status"><span className="live-dot" /><strong>{location ? "Canlı konum alınıyor" : "Konum bekleniyor"}</strong>{location && <span>{ageText(location.timestamp)}</span>}</div>
+      <div className="tracking-status"><span className="live-dot" /><strong>{location ? "Canlı konum alınıyor" : "Konum bekleniyor"}</strong><span>{realtimeLabel}</span>{location && <span>{ageText(location.timestamp)}</span>}</div>
       {loading && !location ? <div className="empty">Konum sorgulanıyor…</div> : location ? <>
         <div className="tracking-coordinates"><div><span>Enlem</span><strong>{location.lat.toFixed(6)}</strong></div><div><span>Boylam</span><strong>{location.lng.toFixed(6)}</strong></div><div><span>Doğruluk</span><strong>{location.accuracyM !== undefined ? `±${location.accuracyM.toFixed(0)} m` : "—"}</strong></div><div><span>Hız</span><strong>{location.speedKph !== undefined ? `${location.speedKph.toFixed(0)} km/sa` : "—"}</strong></div></div>
-        <div className="tracking-route-stats">
-          <div><span>Varış mesafesi</span><strong>{routeDistance !== null ? formatDistance(routeDistance) : "—"}</strong></div>
-          <div><span>Tahmini varış</span><strong>{routeDuration !== null ? formatDuration(routeDuration) : "—"}</strong></div>
-          <div><span>Rota</span><strong>{routeSource === "provider" ? "Yol ağı" : routeSource === "fallback" ? "Yaklaşık" : "Bekleniyor"}</strong></div>
-        </div>
+        <div className="tracking-route-stats"><div><span>Varış mesafesi</span><strong>{routeDistance !== null ? formatDistance(routeDistance) : "—"}</strong></div><div><span>Tahmini varış</span><strong>{routeDuration !== null ? formatDuration(routeDuration) : "—"}</strong></div><div><span>Rota</span><strong>{routeSource === "provider" ? "Yol ağı" : routeSource === "fallback" ? "Yaklaşık" : "Bekleniyor"}</strong></div></div>
         <TrackingMap points={mapPoints} route={route.map((point) => ({ ...point, label: "" }))} />
         <div className="tracking-route"><div><span className="route-marker pickup">A</span><div><strong>Alış noktası</strong><small>{order?.pickupAddress ?? "Konum bilgisi yok"}</small></div></div><div className="route-line" /><div><span className="route-marker delivery">B</span><div><strong>Teslimat noktası</strong><small>{order?.deliveryAddress ?? "Belirtilmemiş"}</small></div></div></div>
         {googleDestination && <a className="tracking-button" href={`https://www.google.com/maps/dir/?api=1&destination=${googleDestination.lat},${googleDestination.lng}`} target="_blank" rel="noreferrer">Rotayı Google Maps&apos;te aç →</a>}
       </> : <div className="empty">{message || "Sürücü henüz konum paylaşmadı."}</div>}
       {message && location && <div className="notice">{message}</div>}
-      <p className="tracking-refresh">Otomatik yenileme: 10 saniye · Durum: {order?.status ?? "—"}</p>
+      <p className="tracking-refresh">WebSocket canlı konum · yedek sorgulama: 15 saniye · Durum: {order?.status ?? "—"}</p>
     </section>}
   </main>;
 }
