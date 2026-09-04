@@ -13,10 +13,41 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/yuklab?schema=public
+  REDIS_URL: redis://localhost:6379
+  JWT_SECRET: 01234567890123456789012345678901
+  CORS_ORIGIN: http://localhost:3000
+  NODE_ENV: test
+
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: yuklab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d yuklab"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -38,6 +69,9 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm --filter @yuklab/database generate
+
+      - name: Prepare integration database
+        run: pnpm --filter @yuklab/api exec prisma db push --schema ../../packages/database/prisma/schema.prisma --skip-generate
 
       - name: Typecheck
         run: pnpm typecheck
