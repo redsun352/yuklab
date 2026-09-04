@@ -3,7 +3,7 @@ export type RoutePoint = { lat: number; lng: number };
 export type RouteResult = {
   distanceMeters: number;
   durationSeconds: number;
-  polyline?: string;
+  geometry?: RoutePoint[];
 };
 
 export interface RoutingProvider {
@@ -21,15 +21,25 @@ class OsrmRoutingProvider implements RoutingProvider {
 
   async route(from: RoutePoint, to: RoutePoint): Promise<RouteResult | null> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Number(process.env.ROUTING_TIMEOUT_MS ?? 5000));
+    const timeoutMs = Number(process.env.ROUTING_TIMEOUT_MS ?? 5000);
+    const timeout = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 5000);
     try {
-      const url = `${this.baseUrl.replace(/\/$/, "")}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
+      const url = `${this.baseUrl.replace(/\/$/, "")}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson&steps=false`;
       const response = await fetch(url, { signal: controller.signal, headers: { accept: "application/json" } });
       if (!response.ok) return null;
-      const body = (await response.json()) as { routes?: Array<{ distance?: number; duration?: number }> };
+      const body = (await response.json()) as {
+        routes?: Array<{ distance?: number; duration?: number; geometry?: { coordinates?: Array<[number, number]> } }>;
+      };
       const route = body.routes?.[0];
       if (!route || !Number.isFinite(route.distance) || !Number.isFinite(route.duration)) return null;
-      return { distanceMeters: route.distance!, durationSeconds: route.duration! };
+      const geometry = route.geometry?.coordinates
+        ?.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))
+        .map(([lng, lat]) => ({ lat, lng }));
+      return {
+        distanceMeters: route.distance!,
+        durationSeconds: route.duration!,
+        geometry: geometry && geometry.length >= 2 ? geometry : undefined,
+      };
     } catch {
       return null;
     } finally {
