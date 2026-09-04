@@ -75,7 +75,7 @@ export default function TrackingPage({ params }: { params: Promise<{ orderId: st
         <div className="tracking-coordinates"><div><span>Enlem</span><strong>{location.lat.toFixed(6)}</strong></div><div><span>Boylam</span><strong>{location.lng.toFixed(6)}</strong></div><div><span>Doğruluk</span><strong>{location.accuracyM !== undefined ? `±${location.accuracyM.toFixed(0)} m` : "—"}</strong></div><div><span>Hız</span><strong>{location.speedKph !== undefined ? `${location.speedKph.toFixed(0)} km/sa` : "—"}</strong></div></div>
         <div className="tracking-map-frame"><iframe title="YükLab canlı teslimat haritası" src={map} loading="lazy" referrerPolicy="no-referrer" /></div>
         <div className="tracking-route"><div><span className="route-marker pickup">A</span><div><strong>Alış noktası</strong><small>{order?.pickupAddress ?? "Konum bilgisi yok"}</small></div></div><div className="route-line" /><div><span className="route-marker delivery">B</span><div><strong>Teslimat noktası</strong><small>{order?.deliveryAddress ?? "Belirtilmemiş"}</small></div></div></div>
-        <a className="tracking-button" href={`https://www.google.com/maps/dir/?api=1&destination=${location.lat},${location.lng}`} target="_blank" rel="noreferrer">Mevcut konumu Google Maps'te aç →</a>
+        <a className="tracking-button" href={`https://www.google.com/maps/dir/?api=1&destination=${location.lat},${location.lng}`} target="_blank" rel="noreferrer">Mevcut konumu Google Maps&apos;te aç →</a>
       </> : <div className="empty">{message || "Sürücü henüz konum paylaşmadı."}</div>}
       {message && location && <div className="notice">{message}</div>}
       <p className="tracking-refresh">Otomatik yenileme: 10 saniye · Durum: {order?.status ?? "—"}</p>
