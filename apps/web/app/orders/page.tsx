@@ -5,10 +5,7 @@ import { acceptOffer, getTrackingWsToken, listOrderMatches, listOrderOffers, lis
 
 function requirementSummary(payload: Order["payload"]) { if (!payload) return ""; const parts: string[] = []; if (payload.weightKg) parts.push(`${payload.weightKg} kg`); if (payload.volumeM3) parts.push(`${payload.volumeM3} m³`); if (payload.vehicleType) parts.push(payload.vehicleType); if (payload.refrigerated) parts.push("Soğutuculu"); return parts.join(" · "); }
 const trackingStatuses = new Set(["DRIVER_ASSIGNED", "EN_ROUTE_PICKUP", "ARRIVED_PICKUP", "LOADED", "IN_TRANSIT", "ARRIVED_DELIVERY", "DELIVERED"]);
-const statusSteps = [
-  ["DRIVER_ASSIGNED", "Sürücü atandı"], ["EN_ROUTE_PICKUP", "Pickup'a gidiliyor"], ["ARRIVED_PICKUP", "Pickup noktasında"],
-  ["LOADED", "Yük alındı"], ["IN_TRANSIT", "Taşınıyor"], ["ARRIVED_DELIVERY", "Teslimat noktasında"], ["DELIVERED", "Teslim edildi"], ["COMPLETED", "Tamamlandı"],
-] as const;
+const statusSteps = [["DRIVER_ASSIGNED", "Sürücü atandı"], ["EN_ROUTE_PICKUP", "Pickup'a gidiliyor"], ["ARRIVED_PICKUP", "Pickup noktasında"], ["LOADED", "Yük alındı"], ["IN_TRANSIT", "Taşınıyor"], ["ARRIVED_DELIVERY", "Teslimat noktasında"], ["DELIVERED", "Teslim edildi"], ["COMPLETED", "Tamamlandı"]] as const;
 const statusLabels: Record<string, string> = Object.fromEntries(statusSteps);
 const terminalLabels: Record<string, string> = { CANCELLED: "İptal edildi", EXPIRED: "Süresi doldu", FAILED: "Başarısız", DISPUTED: "Uyuşmazlık" };
 const terminalStatuses = new Set(["COMPLETED", "CANCELLED", "EXPIRED", "FAILED", "DISPUTED"]);
@@ -20,14 +17,17 @@ export default function OrdersPage(){
  useEffect(()=>{const t=window.localStorage.getItem("yuklab_access_token")??"";setToken(t);if(!t)return;void load(t).catch(e=>setMessage(e instanceof Error?e.message:"Siparişler alınamadı."));const refresh=window.setInterval(()=>{void load(t).catch(()=>undefined);},15000);const sockets=socketsRef.current;return()=>{window.clearInterval(refresh);for(const socket of sockets.values())socket.close();sockets.clear();};},[]);
  useEffect(()=>{
    if(!token)return;
-   const active=new Set(orders.filter(o=>o.assignedDriverId&&!terminalStatuses.has(o.status)).map(o=>o.id));
+   const active=new Set(orders.filter(o=>!terminalStatuses.has(o.status)).map(o=>o.id));
    for(const [id,socket] of socketsRef.current) if(!active.has(id)){socket.close();socketsRef.current.delete(id);}
    for(const order of orders){if(!active.has(order.id)||socketsRef.current.has(order.id))continue;
      void getTrackingWsToken(token,order.id).then(({token:wsToken})=>{
        if(socketsRef.current.has(order.id))return;
        const socket=new WebSocket(trackingWebSocketUrl(order.id),[`yuklab-token.${wsToken}`]);
        socketsRef.current.set(order.id,socket);
-       socket.onmessage=(event)=>{try{const payload=JSON.parse(event.data) as {type?:string;status?:string};if(payload.type!=="order.status"||!payload.status)return;setOrders(current=>current.map(item=>item.id===order.id?{...item,status:payload.status!}:item));}catch{/* Ignore malformed events. */}};
+       socket.onmessage=(event)=>{try{const payload=JSON.parse(event.data) as {type?:string;status?:string};
+         if(payload.type==="order.status"&&payload.status){setOrders(current=>current.map(item=>item.id===order.id?{...item,status:payload.status!}:item));return;}
+         if(payload.type==="order.offer"){void listOrderOffers(token,order.id).then(r=>setOffers(current=>({...current,[order.id]:r.offers}))).catch(()=>undefined);}
+       }catch{/* Ignore malformed events. */}};
        socket.onclose=()=>{if(socketsRef.current.get(order.id)===socket)socketsRef.current.delete(order.id);};
        socket.onerror=()=>undefined;
      }).catch(()=>undefined);
