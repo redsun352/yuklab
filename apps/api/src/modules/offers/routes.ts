@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@yuklab/database";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
+import { publishOrderStatus } from "../tracking/realtime";
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const MAX_ETA_MINUTES = 7 * 24 * 60;
@@ -201,6 +202,8 @@ export async function offerRoutes(app: FastifyInstance) {
 
           return { selected: acceptedOffer, updatedOrder };
         });
+
+        publishOrderStatus(order.id, order.status, "DRIVER_ASSIGNED");
 
         return {
           order: serializeBigInt(accepted.updatedOrder),
