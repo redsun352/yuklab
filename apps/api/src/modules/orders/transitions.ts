@@ -92,9 +92,9 @@ export async function transitionOrder(
         metadata: { from: order.status, to: input.to },
       },
     });
-    return { ...order, status: input.to };
+    return { order: { ...order, status: input.to }, from: order.status };
   });
 
-  publishOrderStatus(input.orderId, result.status === input.to ? "UNKNOWN" : String(result.status), input.to);
-  return result;
+  publishOrderStatus(input.orderId, result.from, result.order.status);
+  return result.order;
 }
