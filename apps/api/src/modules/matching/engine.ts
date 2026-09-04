@@ -141,21 +141,26 @@ export async function findMatches(prisma: PrismaClient, orderId: string): Promis
         { lat: pickupLat, lng: pickupLng },
       );
       const etaMinutes = route ? Math.max(1, Math.ceil(route.durationSeconds / 60)) : null;
-      const distanceScore = Math.max(0, 40 - Math.min(distanceKm, 40));
+
+      // Transparent 100-point score: proximity 35, rating 25, reliability 20,
+      // ETA 10 and vehicle suitability 10. Hard requirements are filtered above.
+      const distanceScore = Math.max(0, 35 * (1 - Math.min(distanceKm, maxRadiusKm) / maxRadiusKm));
       const rating = Number(provider.rating);
       const reliability = Number(provider.reliabilityScore);
-      const ratingScore = Number.isFinite(rating) ? rating * 6 : 0;
-      const reliabilityScore = Number.isFinite(reliability) ? reliability * 0.2 : 0;
-      const etaScore = etaMinutes === null ? 0 : Math.max(0, 20 - Math.min(etaMinutes, 20));
+      const safeRating = Number.isFinite(rating) ? Math.min(5, Math.max(0, rating)) : 0;
+      const safeReliability = Number.isFinite(reliability) ? Math.min(100, Math.max(0, reliability)) : 0;
+      const ratingScore = safeRating * 5;
+      const reliabilityScore = safeReliability * 0.2;
+      const etaScore = etaMinutes === null ? 0 : 10 * (1 - Math.min(etaMinutes, 60) / 60);
       const vehicleScore = vehicle ? 10 : 0;
-      const score = distanceScore + ratingScore + reliabilityScore + etaScore + vehicleScore;
+      const score = Math.min(100, Math.max(0, distanceScore + ratingScore + reliabilityScore + etaScore + vehicleScore));
 
       return {
         providerId: provider.user.id,
         score,
         distanceKm,
-        rating: Number.isFinite(rating) ? rating : 0,
-        reliabilityScore: Number.isFinite(reliability) ? reliability : 0,
+        rating: safeRating,
+        reliabilityScore: safeReliability,
         etaMinutes,
         vehicleId: vehicle?.id ?? null,
         vehicleType: vehicle?.type ?? null,
