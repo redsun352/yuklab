@@ -19,7 +19,7 @@ export const ORDER_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatu
   DISPUTED: [],
 };
 
-const DRIVER_STATUSES = new Set<OrderStatus>([
+const PROVIDER_STATUSES = new Set<OrderStatus>([
   "DRIVER_ASSIGNED",
   "EN_ROUTE_PICKUP",
   "ARRIVED_PICKUP",
@@ -47,8 +47,8 @@ export function canActorTransition(
   if (to === "CANCELLED") {
     return actorId === customerId || actorId === assignedDriverId;
   }
-  if (DRIVER_STATUSES.has(to)) {
-    return actorId === assignedDriverId && role === "DRIVER";
+  if (PROVIDER_STATUSES.has(to)) {
+    return actorId === assignedDriverId && (role === "DRIVER" || role === "SERVICE_PROVIDER");
   }
   return false;
 }
