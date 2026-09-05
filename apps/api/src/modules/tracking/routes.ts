@@ -30,7 +30,7 @@ export async function trackingRoutes(app: FastifyInstance) {
     const shouldPersist = await setDriverLocation(location);
     if (orderId) {
       publishOrderLocation(orderId, location);
-      if (shouldPersist) await prisma.trackingEvent.create({ data: { orderId, actorId: request.user!.id, eventType: "DRIVER_LOCATION", lat, lng, metadata: { heading, speedKph, accuracyM, timestamp: time.toISOString() } } });
+      if (shouldPersist) await prisma.trackingEvent.create({ data: { orderId, actorId: request.user!.id, eventType: "DRIVER_LOCATION", lat, lng, metadata: { heading, speedKph, accuracyM, timestamp: time.toISOString() } });
     }
     return reply.code(204).send();
   });
@@ -44,7 +44,8 @@ export async function trackingRoutes(app: FastifyInstance) {
     } catch (error) {
       const code = error instanceof Error ? error.message : "DELIVERY_PROOF_FAILED";
       if (["ORDER_NOT_FOUND", "NOT_ASSIGNED_PROVIDER", "INVALID_PROOF_STATE", "PROOF_DATA_REQUIRED"].includes(code)) {
-        return reply.code(code === "ORDER_NOT_FOUND" ? 404 : 409).send({ error: code });
+        const statusCode = code === "ORDER_NOT_FOUND" ? 404 : code === "PROOF_DATA_REQUIRED" ? 400 : 409;
+        return reply.code(statusCode).send({ error: code });
       }
       request.log.error(error);
       return reply.code(500).send({ error: "DELIVERY_PROOF_FAILED" });
