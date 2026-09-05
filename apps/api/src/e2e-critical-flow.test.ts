@@ -135,6 +135,16 @@ describe("critical customer-provider order flow", () => {
     expect(offers.statusCode).toBe(200);
     expect(JSON.parse(offers.body).offers).toHaveLength(1);
 
+    await prisma.serviceProvider.update({ where: { userId: providerId }, data: { isAvailable: false } });
+    const staleAccept = await app.inject({
+      method: "POST",
+      url: `/v1/orders/${orderId}/offers/${offerId}/accept`,
+      headers: auth(customer!.accessToken),
+    });
+    expect(staleAccept.statusCode).toBe(409);
+    expect(JSON.parse(staleAccept.body).error).toBe("OFFER_NO_LONGER_ELIGIBLE");
+    await prisma.serviceProvider.update({ where: { userId: providerId }, data: { isAvailable: true } });
+
     const accept = await app.inject({
       method: "POST",
       url: `/v1/orders/${orderId}/offers/${offerId}/accept`,
