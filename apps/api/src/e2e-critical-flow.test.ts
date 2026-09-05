@@ -233,6 +233,17 @@ describe("critical customer-provider order flow", () => {
     expect(completionWithoutProof.statusCode).toBe(409);
     expect(JSON.parse(completionWithoutProof.body).error).toBe("DELIVERY_PROOF_REQUIRED");
 
+    const invalidProof = await app.inject({
+      method: "POST",
+      url: `/v1/tracking/orders/${orderId}/delivery-proof`,
+      headers: auth(provider!.accessToken),
+      payload: {
+        type: "RECIPIENT_CONFIRMATION",
+      },
+    });
+    expect(invalidProof.statusCode).toBe(400);
+    expect(JSON.parse(invalidProof.body).error).toBe("PROOF_DATA_REQUIRED");
+
     const proof = await app.inject({
       method: "POST",
       url: `/v1/tracking/orders/${orderId}/delivery-proof`,
@@ -254,6 +265,24 @@ describe("critical customer-provider order flow", () => {
     });
     expect(completion.statusCode).toBe(200);
     expect(JSON.parse(completion.body).order.status).toBe("COMPLETED");
+
+    const releasedOrder = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: true, assignedDriverId: true, vehicleId: true },
+    });
+    expect(releasedOrder).toEqual({ status: "COMPLETED", assignedDriverId: null, vehicleId: null });
+
+    const releasedProvider = await prisma.serviceProvider.findUnique({
+      where: { userId: providerId },
+      select: { isOnline: true, isAvailable: true },
+    });
+    expect(releasedProvider).toEqual({ isOnline: true, isAvailable: true });
+
+    const completionEvent = await prisma.trackingEvent.findFirst({
+      where: { orderId, eventType: "ORDER_STATUS_COMPLETED" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(completionEvent?.metadata).toMatchObject({ releasedDriverId: providerId, releasedVehicleId: vehicleId });
 
     const inactiveTracking = await app.inject({
       method: "GET",
