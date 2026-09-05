@@ -33,7 +33,7 @@ export async function providerOrderRoutes(app: FastifyInstance) {
         ],
       },
       orderBy: [{ urgency: "desc" }, { createdAt: "asc" }],
-      take: 50,
+      take: 200,
       select: {
         id: true,
         assignedDriverId: true,
@@ -72,6 +72,7 @@ export async function providerOrderRoutes(app: FastifyInstance) {
         if (b.order.urgency !== a.order.urgency) return b.order.urgency - a.order.urgency;
         return (b.match?.score ?? 0) - (a.match?.score ?? 0);
       })
+      .slice(0, 50)
       .map(({ order, match }) => match ? { ...order, match } : order);
 
     return { orders: serializeBigInt(visibleOrders) };
