@@ -7,6 +7,7 @@ import { publishOrderLocation } from "./realtime";
 
 const MAX_LOCATION_AGE_MS = 5 * 60 * 1000;
 const MAX_LOCATION_FUTURE_MS = 60 * 1000;
+const MAX_HISTORY_LIMIT = 500;
 const TERMINAL_ORDER_STATUSES: OrderStatus[] = [OrderStatus.CANCELLED, OrderStatus.EXPIRED, OrderStatus.FAILED, OrderStatus.COMPLETED, OrderStatus.DISPUTED];
 
 export async function trackingRoutes(app: FastifyInstance) {
@@ -29,8 +30,22 @@ export async function trackingRoutes(app: FastifyInstance) {
     }
 
     const location = { driverId: request.user!.id, lat, lng, heading, speedKph, accuracyM, timestamp: time.toISOString() };
-    await setDriverLocation(location);
-    if (orderId) publishOrderLocation(orderId, location);
+    const shouldPersist = await setDriverLocation(location);
+    if (orderId) {
+      publishOrderLocation(orderId, location);
+      if (shouldPersist) {
+        await prisma.trackingEvent.create({
+          data: {
+            orderId,
+            actorId: request.user!.id,
+            eventType: "DRIVER_LOCATION",
+            lat,
+            lng,
+            metadata: { heading, speedKph, accuracyM, timestamp: time.toISOString() },
+          },
+        });
+      }
+    }
     return reply.code(204).send();
   });
 
@@ -47,6 +62,29 @@ export async function trackingRoutes(app: FastifyInstance) {
     const location = await getDriverLocation(request.params.driverId);
     if (!location) return reply.code(404).send({ error: "LOCATION_NOT_AVAILABLE" });
     return { location };
+  });
+
+  app.get<{ Params: { orderId: string }; Querystring: { limit?: string; before?: string } }>("/v1/tracking/orders/:orderId/history", { preHandler: requireAuth }, async (request, reply) => {
+    const order = await prisma.order.findFirst({
+      where: { id: request.params.orderId, OR: [{ customerId: request.user!.id }, { assignedDriverId: request.user!.id }] },
+      select: { id: true },
+    });
+    if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
+
+    const requestedLimit = request.query.limit === undefined ? 100 : Number(request.query.limit);
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > MAX_HISTORY_LIMIT) {
+      return reply.code(400).send({ error: "INVALID_LIMIT" });
+    }
+    const before = request.query.before ? new Date(request.query.before) : undefined;
+    if (before && Number.isNaN(before.getTime())) return reply.code(400).send({ error: "INVALID_BEFORE" });
+
+    const events = await prisma.trackingEvent.findMany({
+      where: { orderId: order.id, ...(before ? { createdAt: { lt: before } } : {}) },
+      orderBy: { createdAt: "desc" },
+      take: requestedLimit,
+      select: { id: true, actorId: true, eventType: true, lat: true, lng: true, etaSeconds: true, metadata: true, createdAt: true },
+    });
+    return { events, nextBefore: events.length === requestedLimit ? events[events.length - 1]?.createdAt ?? null : null };
   });
 
   app.get<{ Params: { orderId: string } }>("/v1/tracking/orders/:orderId/location", { preHandler: requireAuth }, async (request, reply) => {
