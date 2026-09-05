@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Prisma } from "@yuklab/database";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
+import { findMatches } from "../matching/engine";
 import { publishOrderOffer, publishOrderStatus } from "../tracking/realtime";
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
@@ -20,6 +21,10 @@ export async function offerRoutes(app: FastifyInstance) {
   }>("/v1/orders/:orderId/offers", { preHandler: requireRole("DRIVER", "SERVICE_PROVIDER") }, async (req, reply) => {
     const order = await prisma.order.findUnique({ where: { id: req.params.orderId } });
     if (!order || !["PUBLISHED", "OFFERING"].includes(order.status)) return reply.code(404).send({ error: "ORDER_NOT_OPEN" });
+
+    const matches = await findMatches(prisma, order.id);
+    const eligible = matches.find((candidate) => candidate.providerId === req.user!.id);
+    if (!eligible) return reply.code(403).send({ error: "PROVIDER_NOT_MATCHED" });
 
     let amountMinor: bigint;
     try {
@@ -69,7 +74,7 @@ export async function offerRoutes(app: FastifyInstance) {
   app.get<{ Params: { orderId: string } }>("/v1/orders/:orderId/offers", { preHandler: requireAuth }, async (req, reply) => {
     const order = await prisma.order.findFirst({ where: { id: req.params.orderId, customerId: req.user!.id } });
     if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
-    const offers = await prisma.offer.findMany({ where: { orderId: order.id }, orderBy: [{ status: "asc" }, { amountMinor: "asc" }], include: { provider: { select: { id: true, firstName: true, lastName: true, role: true } } } });
+    const offers = await prisma.offer.findMany({ where: { orderId: order.id }, orderBy: [{ status: "asc" }, { amountMinor: "asc" }], include: { provider: { select: { id: true, firstName: true, lastName: true, role: true } } });
     return { offers: serializeBigInt(offers) };
   });
 
