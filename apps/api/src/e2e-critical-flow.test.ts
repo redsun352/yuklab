@@ -48,9 +48,10 @@ describe("critical customer-provider order flow", () => {
       where: { id: providerId },
       data: { role: "SERVICE_PROVIDER" },
     });
-    await prisma.driverProfile.create({
+    await prisma.serviceProvider.create({
       data: {
         userId: providerId,
+        category: "Yük Taşımacılığı",
         isOnline: true,
         isAvailable: true,
         rating: 5,
@@ -72,6 +73,7 @@ describe("critical customer-provider order flow", () => {
     if (orderId) await prisma.order.deleteMany({ where: { id: orderId } });
     const userIds = [customerId, providerId].filter((id): id is string => Boolean(id));
     if (userIds.length > 0) {
+      await prisma.serviceProvider.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.driverProfile.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.authSession.deleteMany({ where: { userId: { in: userIds } } });
       await prisma.user.deleteMany({ where: { id: { in: userIds } } });
