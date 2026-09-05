@@ -9,6 +9,15 @@ const CURRENCY_RE = /^[A-Z]{3}$/;
 const MAX_ETA_MINUTES = 7 * 24 * 60;
 const MAX_NOTE_LENGTH = 1000;
 const MAX_OFFER_AMOUNT_MINOR = 9223372036854775807n;
+const ACTIVE_ASSIGNMENT_STATUSES = [
+  "DRIVER_ASSIGNED",
+  "EN_ROUTE_PICKUP",
+  "ARRIVED_PICKUP",
+  "LOADED",
+  "IN_TRANSIT",
+  "ARRIVED_DELIVERY",
+  "DELIVERED",
+] as const;
 
 function serializeBigInt<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v))) as T;
@@ -97,6 +106,10 @@ export async function offerRoutes(app: FastifyInstance) {
 
     try {
       const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Serialize claims for the same provider. Provider availability is a single
+        // operational slot, so a driver/service provider cannot run two active orders.
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`yuklab:provider:${selectedBeforeClaim.providerId}`}, 0))`);
+
         // Re-check provider eligibility inside the same transaction that claims the order.
         // This closes the stale-precheck window where a provider can go offline after matching.
         const provider = await tx.user.findFirst({
@@ -113,12 +126,28 @@ export async function offerRoutes(app: FastifyInstance) {
         });
         if (!provider) throw new Error("OFFER_NO_LONGER_ELIGIBLE");
 
+        const activeProviderOrder = await tx.order.findFirst({
+          where: { assignedDriverId: selectedBeforeClaim.providerId, status: { in: [...ACTIVE_ASSIGNMENT_STATUSES] } },
+          select: { id: true },
+        });
+        if (activeProviderOrder) throw new Error("PROVIDER_NO_LONGER_AVAILABLE");
+
         if (match.vehicleId) {
+          // Vehicle claims are separately serialized so two offers cannot bind the
+          // same physical vehicle even when they target different providers.
+          await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`yuklab:vehicle:${match.vehicleId}`}, 0))`);
+
           const vehicle = await tx.vehicle.findFirst({
             where: { id: match.vehicleId, ownerId: selectedBeforeClaim.providerId, active: true },
             select: { id: true },
           });
           if (!vehicle) throw new Error("VEHICLE_NO_LONGER_AVAILABLE");
+
+          const activeVehicleOrder = await tx.order.findFirst({
+            where: { vehicleId: match.vehicleId, status: { in: [...ACTIVE_ASSIGNMENT_STATUSES] } },
+            select: { id: true },
+          });
+          if (activeVehicleOrder) throw new Error("VEHICLE_NO_LONGER_AVAILABLE");
         }
 
         const claimed = await tx.order.updateMany({ where: { id: order.id, customerId: req.user!.id, status: { in: ["PUBLISHED", "OFFERING"] } }, data: { status: "DRIVER_ASSIGNED", assignedDriverId: selectedBeforeClaim.providerId, vehicleId: match.vehicleId } });
@@ -156,6 +185,7 @@ export async function offerRoutes(app: FastifyInstance) {
       if (error instanceof Error && error.message === "ORDER_ALREADY_ASSIGNED") return reply.code(409).send({ error: "ORDER_NOT_ACCEPTING_OFFERS" });
       if (error instanceof Error && error.message === "OFFER_NOT_FOUND_OR_EXPIRED") return reply.code(410).send({ error: "OFFER_EXPIRED_OR_NOT_FOUND" });
       if (error instanceof Error && error.message === "OFFER_NO_LONGER_ELIGIBLE") return reply.code(409).send({ error: "OFFER_NO_LONGER_ELIGIBLE" });
+      if (error instanceof Error && error.message === "PROVIDER_NO_LONGER_AVAILABLE") return reply.code(409).send({ error: "PROVIDER_NO_LONGER_AVAILABLE" });
       if (error instanceof Error && error.message === "VEHICLE_NO_LONGER_AVAILABLE") return reply.code(409).send({ error: "VEHICLE_NO_LONGER_AVAILABLE" });
       throw error;
     }
