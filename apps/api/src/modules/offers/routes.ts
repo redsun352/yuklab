@@ -92,20 +92,62 @@ export async function offerRoutes(app: FastifyInstance) {
     });
     if (!selectedBeforeClaim) return reply.code(410).send({ error: "OFFER_EXPIRED_OR_NOT_FOUND" });
 
-    const matches = await findMatches(prisma, order.id);
-    if (!matches.some((candidate) => candidate.providerId === selectedBeforeClaim.providerId)) {
-      return reply.code(409).send({ error: "OFFER_NO_LONGER_ELIGIBLE" });
-    }
+    const match = (await findMatches(prisma, order.id)).find((candidate) => candidate.providerId === selectedBeforeClaim.providerId);
+    if (!match) return reply.code(409).send({ error: "OFFER_NO_LONGER_ELIGIBLE" });
 
     try {
       const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        const claimed = await tx.order.updateMany({ where: { id: order.id, customerId: req.user!.id, status: { in: ["PUBLISHED", "OFFERING"] } }, data: { status: "DRIVER_ASSIGNED" } });
+        // Re-check provider eligibility inside the same transaction that claims the order.
+        // This closes the stale-precheck window where a provider can go offline after matching.
+        const provider = await tx.user.findFirst({
+          where: {
+            id: selectedBeforeClaim.providerId,
+            status: "ACTIVE",
+            role: { in: ["DRIVER", "SERVICE_PROVIDER"] },
+            OR: [
+              { driverProfile: { is: { isOnline: true, isAvailable: true } } },
+              { serviceProvider: { is: { isOnline: true, isAvailable: true } } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!provider) throw new Error("OFFER_NO_LONGER_ELIGIBLE");
+
+        if (match.vehicleId) {
+          const vehicle = await tx.vehicle.findFirst({
+            where: { id: match.vehicleId, ownerId: selectedBeforeClaim.providerId, active: true },
+            select: { id: true },
+          });
+          if (!vehicle) throw new Error("VEHICLE_NO_LONGER_AVAILABLE");
+        }
+
+        const claimed = await tx.order.updateMany({ where: { id: order.id, customerId: req.user!.id, status: { in: ["PUBLISHED", "OFFERING"] } }, data: { status: "DRIVER_ASSIGNED", assignedDriverId: selectedBeforeClaim.providerId, vehicleId: match.vehicleId } });
         if (claimed.count !== 1) throw new Error("ORDER_ALREADY_ASSIGNED");
+
         const selected = await tx.offer.findFirst({ where: { id: req.params.offerId, orderId: order.id, status: "PENDING", OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } });
         if (!selected) throw new Error("OFFER_NOT_FOUND_OR_EXPIRED");
         await tx.offer.updateMany({ where: { orderId: order.id, status: "PENDING", id: { not: selected.id } }, data: { status: "REJECTED" } });
         const acceptedOffer = await tx.offer.update({ where: { id: selected.id }, data: { status: "ACCEPTED" } });
-        const updatedOrder = await tx.order.update({ where: { id: order.id }, data: { assignedDriverId: selected.providerId } });
+
+        await tx.trackingEvent.create({
+          data: {
+            orderId: order.id,
+            actorId: req.user!.id,
+            eventType: "OFFER_ACCEPTED",
+            metadata: { offerId: selected.id, providerId: selected.providerId, vehicleId: match.vehicleId },
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: req.user!.id,
+            action: "OFFER_ACCEPTED",
+            entityType: "Offer",
+            entityId: selected.id,
+            metadata: { orderId: order.id, providerId: selected.providerId, vehicleId: match.vehicleId },
+          },
+        });
+
+        const updatedOrder = await tx.order.findUniqueOrThrow({ where: { id: order.id } });
         return { selected: acceptedOffer, updatedOrder };
       });
       publishOrderStatus(order.id, order.status, "DRIVER_ASSIGNED");
@@ -113,6 +155,8 @@ export async function offerRoutes(app: FastifyInstance) {
     } catch (error: unknown) {
       if (error instanceof Error && error.message === "ORDER_ALREADY_ASSIGNED") return reply.code(409).send({ error: "ORDER_NOT_ACCEPTING_OFFERS" });
       if (error instanceof Error && error.message === "OFFER_NOT_FOUND_OR_EXPIRED") return reply.code(410).send({ error: "OFFER_EXPIRED_OR_NOT_FOUND" });
+      if (error instanceof Error && error.message === "OFFER_NO_LONGER_ELIGIBLE") return reply.code(409).send({ error: "OFFER_NO_LONGER_ELIGIBLE" });
+      if (error instanceof Error && error.message === "VEHICLE_NO_LONGER_AVAILABLE") return reply.code(409).send({ error: "VEHICLE_NO_LONGER_AVAILABLE" });
       throw error;
     }
   });
