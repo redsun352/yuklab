@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { Prisma } from "@yuklab/database";
+import { Prisma } from "@yuklab/database";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
 import { findMatches } from "../matching/engine";
