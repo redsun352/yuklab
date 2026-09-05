@@ -37,10 +37,6 @@ export async function transitionOrder(prisma: PrismaClient, input: { orderId: st
     const order = await tx.order.findUnique({ where: { id: input.orderId }, select: { id: true, customerId: true, assignedDriverId: true, vehicleId: true, status: true } });
     if (!order) throw new Error("ORDER_NOT_FOUND");
     if (!canActorTransition(input.actorRole, input.actorId, order.customerId, order.assignedDriverId, order.status, input.to)) throw new Error("INVALID_ORDER_TRANSITION");
-    if (input.to === "COMPLETED") {
-      const proof = await tx.trackingEvent.findFirst({ where: { orderId: order.id, eventType: "DELIVERY_PROOF_SUBMITTED" }, select: { id: true } });
-      if (!proof) throw new Error("DELIVERY_PROOF_REQUIRED");
-    }
     const updated = await tx.order.updateMany({ where: { id: order.id, status: order.status }, data: input.to === "CANCELLED" ? { status: input.to, assignedDriverId: null, vehicleId: null } : { status: input.to } });
     if (updated.count !== 1) throw new Error("ORDER_STATE_RACE");
     await tx.trackingEvent.create({ data: { orderId: order.id, actorId: input.actorId, eventType: `ORDER_STATUS_${input.to}`, metadata: { from: order.status, to: input.to, ...(input.to === "CANCELLED" ? { releasedDriverId: order.assignedDriverId, releasedVehicleId: order.vehicleId } : {}), ...(input.metadata ?? {}) } } });
