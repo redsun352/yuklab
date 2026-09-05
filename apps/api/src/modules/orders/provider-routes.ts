@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { prisma } from "../../lib/prisma";
 import { requireRole } from "../auth/guard";
 import { findMatches } from "../matching/engine";
+import { prisma } from "../../lib/prisma";
 
 function serializeBigInt<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v))) as T;
@@ -54,31 +54,27 @@ export async function providerOrderRoutes(app: FastifyInstance) {
       },
     });
 
-    if (request.user!.role === "DRIVER") {
-      const matched = await Promise.all(
-        orders.map(async (order) => {
-          if (order.assignedDriverId === request.user!.id) return { order, match: null };
-          if (order.status !== "PUBLISHED" && order.status !== "OFFERING") return null;
-          const candidates = await findMatches(prisma, order.id);
-          const match = candidates.find((candidate) => candidate.providerId === request.user!.id);
-          return match ? { order, match } : null;
-        }),
-      );
+    const matched = await Promise.all(
+      orders.map(async (order) => {
+        if (order.assignedDriverId === request.user!.id) return { order, match: null };
+        if (order.status !== "PUBLISHED" && order.status !== "OFFERING") return null;
+        const candidates = await findMatches(prisma, order.id);
+        const match = candidates.find((candidate) => candidate.providerId === request.user!.id);
+        return match ? { order, match } : null;
+      }),
+    );
 
-      const matchedOrders = matched
-        .filter((item) => item !== null)
-        .sort((a, b) => {
-          if (a.order.assignedDriverId === request.user!.id) return -1;
-          if (b.order.assignedDriverId === request.user!.id) return 1;
-          if (b.order.urgency !== a.order.urgency) return b.order.urgency - a.order.urgency;
-          return (b.match?.score ?? 0) - (a.match?.score ?? 0);
-        })
-        .map(({ order, match }) => match ? { ...order, match } : order);
+    const visibleOrders = matched
+      .filter((item): item is { order: (typeof orders)[number]; match: Awaited<ReturnType<typeof findMatches>>[number] | null } => item !== null)
+      .sort((a, b) => {
+        if (a.order.assignedDriverId === request.user!.id) return -1;
+        if (b.order.assignedDriverId === request.user!.id) return 1;
+        if (b.order.urgency !== a.order.urgency) return b.order.urgency - a.order.urgency;
+        return (b.match?.score ?? 0) - (a.match?.score ?? 0);
+      })
+      .map(({ order, match }) => match ? { ...order, match } : order);
 
-      return { orders: serializeBigInt(matchedOrders) };
-    }
-
-    return { orders: serializeBigInt(orders) };
+    return { orders: serializeBigInt(visibleOrders) };
   });
 
   app.get("/v1/provider/offers", { preHandler: requireRole("DRIVER", "SERVICE_PROVIDER") }, async (request) => {
