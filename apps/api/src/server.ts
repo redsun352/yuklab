@@ -13,6 +13,7 @@ import { trackingRoutes } from "./modules/tracking/routes";
 import { trackingRealtimeRoutes } from "./modules/tracking/realtime";
 import { trackingWsTokenRoutes } from "./modules/tracking/ws-token";
 import { vehicleRoutes } from "./modules/vehicles/routes";
+import { providerRoutes } from "./modules/providers/routes";
 import { routingRoutes } from "./modules/routing/routes";
 import { prisma } from "./lib/prisma";
 
@@ -66,6 +67,7 @@ export function buildApp() {
   app.register(trackingWsTokenRoutes);
   app.register(trackingRealtimeRoutes);
   app.register(vehicleRoutes);
+  app.register(providerRoutes);
   app.register(routingRoutes);
 
   return app;

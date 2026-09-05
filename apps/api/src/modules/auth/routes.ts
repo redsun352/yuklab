@@ -10,6 +10,7 @@ const MAX_EMAIL_LENGTH = 254;
 const MAX_PHONE_LENGTH = 32;
 const MAX_PASSWORD_LENGTH = 128;
 const MAX_LANGUAGE_LENGTH = 16;
+const MAX_CATEGORY_LENGTH = 80;
 
 function getJwtSecret() {
   const value = process.env.JWT_SECRET;
@@ -68,9 +69,7 @@ export async function authRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const identifier = typeof request.body?.identifier === "string" ? request.body.identifier.trim() : "";
       const password = typeof request.body?.password === "string" ? request.body.password : "";
-      if (!isBoundedString(identifier, Math.max(MAX_EMAIL_LENGTH, MAX_PHONE_LENGTH)) || password.length === 0 || password.length > MAX_PASSWORD_LENGTH) {
-        return reply.code(400).send({ error: "INVALID_INPUT" });
-      }
+      if (!isBoundedString(identifier, Math.max(MAX_EMAIL_LENGTH, MAX_PHONE_LENGTH)) || password.length === 0 || password.length > MAX_PASSWORD_LENGTH) return reply.code(400).send({ error: "INVALID_INPUT" });
 
       const normalizedEmail = identifier.toLowerCase();
       const user = await prisma.user.findFirst({ where: { OR: [{ email: normalizedEmail }, { phone: identifier }] } });
@@ -104,27 +103,37 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post<{ Body: { refreshToken: string } }>("/v1/auth/logout", { preHandler: requireAuth }, async (request, reply) => {
     const refreshToken = typeof request.body?.refreshToken === "string" ? request.body.refreshToken : "";
-    if (refreshToken.length > 0 && refreshToken.length <= 512) {
-      await prisma.authSession.updateMany({ where: { userId: request.user!.id, refreshTokenHash: hashToken(refreshToken), revokedAt: null }, data: { revokedAt: new Date() } });
-    }
+    if (refreshToken.length > 0 && refreshToken.length <= 512) await prisma.authSession.updateMany({ where: { userId: request.user!.id, refreshTokenHash: hashToken(refreshToken), revokedAt: null }, data: { revokedAt: new Date() } });
     return reply.code(204).send();
   });
 
-  app.post<{ Body: { category?: string } }>("/v1/auth/become-provider", { preHandler: requireAuth }, async (request, reply) => {
+  app.post<{ Body: { category?: string; providerType?: "DRIVER" | "SERVICE_PROVIDER" } }>("/v1/auth/become-provider", { preHandler: requireAuth }, async (request, reply) => {
     const userId = request.user!.id;
-    const category = typeof request.body?.category === "string" && request.body.category.trim().length <= 80 ? request.body.category.trim() || "GENERAL" : "GENERAL";
-    const user = await prisma.user.findUnique({ where: { id: userId }, include: { driverProfile: true, serviceProvider: true } });
+    const body = request.body ?? {};
+    const providerType = body.providerType === "SERVICE_PROVIDER" ? "SERVICE_PROVIDER" : "DRIVER";
+    const category = typeof body.category === "string" && body.category.trim().length > 0 && body.category.trim().length <= MAX_CATEGORY_LENGTH ? body.category.trim() : "GENERAL";
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.status !== "ACTIVE") return reply.code(403).send({ error: "ACCOUNT_NOT_ACTIVE" });
-    if (user.role !== "CUSTOMER" && user.role !== "DRIVER" && user.role !== "SERVICE_PROVIDER") return reply.code(403).send({ error: "ROLE_NOT_ELIGIBLE" });
+    if (!["CUSTOMER", "DRIVER", "SERVICE_PROVIDER"].includes(user.role)) return reply.code(403).send({ error: "ROLE_NOT_ELIGIBLE" });
 
     const updated = await prisma.$transaction(async (tx) => {
-      if (user.role === "CUSTOMER") {
-        await tx.user.update({ where: { id: userId }, data: { role: "DRIVER" } });
+      await tx.user.update({ where: { id: userId }, data: { role: providerType } });
+      if (providerType === "SERVICE_PROVIDER") {
+        await tx.serviceProvider.upsert({
+          where: { userId },
+          create: { userId, category, isOnline: false, isAvailable: false },
+          update: { category },
+        });
+      } else {
+        await tx.driverProfile.upsert({
+          where: { userId },
+          create: { userId, isOnline: false, isAvailable: false },
+          update: {},
+        });
       }
-      await tx.driverProfile.upsert({ where: { userId }, create: { userId, isOnline: false, isAvailable: false }, update: {} });
       return tx.user.findUniqueOrThrow({ where: { id: userId } });
     });
 
-    return { user: publicUser(updated), provider: { category, isOnline: false, isAvailable: false } };
+    return { user: publicUser(updated), provider: { type: providerType, category: providerType === "SERVICE_PROVIDER" ? category : null, isOnline: false, isAvailable: false } };
   });
 }
