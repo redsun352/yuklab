@@ -20,9 +20,10 @@ export async function expireOffers(prisma: PrismaClient, now = new Date()) {
   let ordersReopened = 0;
 
   for (const orderId of orderIds) {
+    const expiredIds = expired.filter((offer) => offer.orderId === orderId).map((offer) => offer.id);
     const result = await prisma.$transaction(async (tx) => {
       const updatedOffers = await tx.offer.updateMany({
-        where: { orderId, status: "PENDING", expiresAt: { lte: now } },
+        where: { id: { in: expiredIds }, status: "PENDING", expiresAt: { lte: now } },
         data: { status: "EXPIRED" },
       });
 
@@ -38,10 +39,10 @@ export async function expireOffers(prisma: PrismaClient, now = new Date()) {
 
       await tx.auditLog.createMany({
         data: [
-          ...expired.filter((offer) => offer.orderId === orderId).map((offer) => ({
+          ...expiredIds.map((offerId) => ({
             action: "OFFER_EXPIRED",
             entityType: "Offer",
-            entityId: offer.id,
+            entityId: offerId,
             metadata: { orderId },
           })),
           ...(reopened.count === 1 ? [{
