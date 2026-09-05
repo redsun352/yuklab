@@ -34,7 +34,10 @@ export async function offerRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "INVALID_AMOUNT" });
     }
     if (amountMinor <= 0n || amountMinor > MAX_OFFER_AMOUNT_MINOR) return reply.code(400).send({ error: "INVALID_AMOUNT" });
-    if (req.body.currency !== undefined && !CURRENCY_RE.test(req.body.currency)) return reply.code(400).send({ error: "INVALID_CURRENCY" });
+
+    const currency = (req.body.currency ?? order.currency).trim().toUpperCase();
+    if (!CURRENCY_RE.test(currency)) return reply.code(400).send({ error: "INVALID_CURRENCY" });
+    if (currency !== order.currency) return reply.code(400).send({ error: "CURRENCY_MISMATCH" });
 
     let etaMinutes: number | undefined;
     if (req.body.etaMinutes !== undefined) {
@@ -57,7 +60,7 @@ export async function offerRoutes(app: FastifyInstance) {
 
     try {
       const created = await prisma.$transaction(async (tx) => {
-        const offer = await tx.offer.create({ data: { orderId: order.id, providerId: req.user!.id, amountMinor, currency: req.body.currency ?? order.currency, etaMinutes, note, expiresAt } });
+        const offer = await tx.offer.create({ data: { orderId: order.id, providerId: req.user!.id, amountMinor, currency, etaMinutes, note, expiresAt } });
         if (order.status === "PUBLISHED") await tx.order.update({ where: { id: order.id }, data: { status: "OFFERING" } });
         return offer;
       });
@@ -82,6 +85,17 @@ export async function offerRoutes(app: FastifyInstance) {
     const order = await prisma.order.findFirst({ where: { id: req.params.orderId, customerId: req.user!.id }, select: { id: true, status: true } });
     if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
     if (!["PUBLISHED", "OFFERING"].includes(order.status)) return reply.code(409).send({ error: "ORDER_NOT_ACCEPTING_OFFERS" });
+
+    const selectedBeforeClaim = await prisma.offer.findFirst({
+      where: { id: req.params.offerId, orderId: order.id, status: "PENDING", OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+      select: { id: true, providerId: true },
+    });
+    if (!selectedBeforeClaim) return reply.code(410).send({ error: "OFFER_EXPIRED_OR_NOT_FOUND" });
+
+    const matches = await findMatches(prisma, order.id);
+    if (!matches.some((candidate) => candidate.providerId === selectedBeforeClaim.providerId)) {
+      return reply.code(409).send({ error: "OFFER_NO_LONGER_ELIGIBLE" });
+    }
 
     try {
       const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
