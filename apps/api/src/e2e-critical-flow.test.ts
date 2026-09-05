@@ -36,6 +36,7 @@ describe("critical customer-provider order flow", () => {
   let customer: { accessToken: string; user: { id: string } } | undefined;
   let provider: { accessToken: string; user: { id: string } } | undefined;
   let orderId: string | undefined;
+  let vehicleId: string | undefined;
 
   beforeAll(async () => {
     customer = await registerAndLogin(customerEmail, "E2E", "Customer");
@@ -58,6 +59,18 @@ describe("critical customer-provider order flow", () => {
         reliabilityScore: 100,
       },
     });
+    const vehicle = await prisma.vehicle.create({
+      data: {
+        ownerId: providerId,
+        type: "Kamyon",
+        subtype: "Standart",
+        plateNumber: `E2E-${suffix.slice(-8).toUpperCase()}`,
+        capacityKg: 20000,
+        volumeM3: 50,
+        active: true,
+      },
+    });
+    vehicleId = vehicle.id;
     await setDriverLocation({
       driverId: providerId,
       lat: 38.7000,
@@ -84,6 +97,7 @@ describe("critical customer-provider order flow", () => {
   it("runs order creation through delivery completion and tracking", async () => {
     expect(customer).toBeDefined();
     expect(provider).toBeDefined();
+    expect(vehicleId).toBeDefined();
 
     const createOrder = await app.inject({
       method: "POST",
@@ -153,6 +167,13 @@ describe("critical customer-provider order flow", () => {
     expect(accept.statusCode).toBe(200);
     expect(JSON.parse(accept.body).order.status).toBe("DRIVER_ASSIGNED");
     expect(JSON.parse(accept.body).order.assignedDriverId).toBe(providerId);
+    expect(JSON.parse(accept.body).order.vehicleId).toBe(vehicleId);
+
+    const acceptanceEvent = await prisma.trackingEvent.findFirst({
+      where: { orderId, eventType: "OFFER_ACCEPTED" },
+    });
+    expect(acceptanceEvent).not.toBeNull();
+    expect(acceptanceEvent?.metadata).toMatchObject({ offerId, providerId, vehicleId });
 
     const preTrackingStatuses = ["EN_ROUTE_PICKUP", "ARRIVED_PICKUP", "LOADED", "IN_TRANSIT"];
     for (const status of preTrackingStatuses) {
