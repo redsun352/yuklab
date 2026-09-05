@@ -213,7 +213,7 @@ describe("critical customer-provider order flow", () => {
     expect(JSON.parse(tracking.body).location.driverId).toBe(providerId);
     expect(JSON.parse(tracking.body).location.lat).toBe(38.72);
 
-    for (const status of ["ARRIVED_DELIVERY", "DELIVERED", "COMPLETED"]) {
+    for (const status of ["ARRIVED_DELIVERY", "DELIVERED"]) {
       const transition = await app.inject({
         method: "POST",
         url: `/v1/orders/${orderId}/status`,
@@ -223,6 +223,37 @@ describe("critical customer-provider order flow", () => {
       expect(transition.statusCode, `transition to ${status}`).toBe(200);
       expect(JSON.parse(transition.body).order.status).toBe(status);
     }
+
+    const completionWithoutProof = await app.inject({
+      method: "POST",
+      url: `/v1/orders/${orderId}/status`,
+      headers: auth(provider!.accessToken),
+      payload: { status: "COMPLETED" },
+    });
+    expect(completionWithoutProof.statusCode).toBe(409);
+    expect(JSON.parse(completionWithoutProof.body).error).toBe("DELIVERY_PROOF_REQUIRED");
+
+    const proof = await app.inject({
+      method: "POST",
+      url: `/v1/tracking/orders/${orderId}/delivery-proof`,
+      headers: auth(provider!.accessToken),
+      payload: {
+        type: "RECIPIENT_CONFIRMATION",
+        recipientName: "E2E Recipient",
+        note: "Delivery confirmed in E2E test",
+      },
+    });
+    expect(proof.statusCode).toBe(201);
+    expect(JSON.parse(proof.body).proof.eventType).toBe("DELIVERY_PROOF_SUBMITTED");
+
+    const completion = await app.inject({
+      method: "POST",
+      url: `/v1/orders/${orderId}/status`,
+      headers: auth(provider!.accessToken),
+      payload: { status: "COMPLETED" },
+    });
+    expect(completion.statusCode).toBe(200);
+    expect(JSON.parse(completion.body).order.status).toBe("COMPLETED");
 
     const inactiveTracking = await app.inject({
       method: "GET",
