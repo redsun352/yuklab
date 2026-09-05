@@ -80,13 +80,28 @@ export async function transitionOrder(
       if (!proof) throw new Error("DELIVERY_PROOF_REQUIRED");
     }
 
+    const isResourceReleasing = input.to === "CANCELLED" || input.to === "COMPLETED";
+    const releasedDriverId = isResourceReleasing ? order.assignedDriverId : null;
+    const releasedVehicleId = isResourceReleasing ? order.vehicleId : null;
+
     const updated = await tx.order.updateMany({
       where: { id: order.id, status: order.status },
-      data: input.to === "CANCELLED"
+      data: isResourceReleasing
         ? { status: input.to, assignedDriverId: null, vehicleId: null }
         : { status: input.to },
     });
     if (updated.count !== 1) throw new Error("ORDER_STATE_RACE");
+
+    if (input.to === "COMPLETED" && releasedDriverId) {
+      await tx.driverProfile.updateMany({
+        where: { userId: releasedDriverId },
+        data: { isAvailable: true },
+      });
+      await tx.serviceProvider.updateMany({
+        where: { userId: releasedDriverId },
+        data: { isAvailable: true },
+      });
+    }
 
     await tx.trackingEvent.create({
       data: {
@@ -96,7 +111,7 @@ export async function transitionOrder(
         metadata: {
           from: order.status,
           to: input.to,
-          ...(input.to === "CANCELLED" ? { releasedDriverId: order.assignedDriverId, releasedVehicleId: order.vehicleId } : {}),
+          ...(isResourceReleasing ? { releasedDriverId, releasedVehicleId } : {}),
           ...(input.metadata ?? {}),
         },
       },
@@ -110,11 +125,18 @@ export async function transitionOrder(
         metadata: {
           from: order.status,
           to: input.to,
-          ...(input.to === "CANCELLED" ? { releasedDriverId: order.assignedDriverId, releasedVehicleId: order.vehicleId } : {}),
+          ...(isResourceReleasing ? { releasedDriverId, releasedVehicleId } : {}),
         },
       },
     });
-    return { order: { ...order, status: input.to, ...(input.to === "CANCELLED" ? { assignedDriverId: null, vehicleId: null } : {}) }, from: order.status };
+    return {
+      order: {
+        ...order,
+        status: input.to,
+        ...(isResourceReleasing ? { assignedDriverId: null, vehicleId: null } : {}),
+      },
+      from: order.status,
+    };
   });
   publishOrderStatus(input.orderId, result.from, result.order.status);
   return result.order;
