@@ -35,10 +35,7 @@ export async function orderTransitionRoutes(app: FastifyInstance) {
         if (code === "ORDER_NOT_FOUND") {
           return reply.code(404).send({ error: code });
         }
-        if (code === "INVALID_ORDER_TRANSITION") {
-          return reply.code(409).send({ error: code });
-        }
-        if (code === "ORDER_STATE_RACE") {
+        if (["INVALID_ORDER_TRANSITION", "ORDER_STATE_RACE", "DELIVERY_PROOF_REQUIRED"].includes(code)) {
           return reply.code(409).send({ error: code });
         }
         request.log.error(error);
