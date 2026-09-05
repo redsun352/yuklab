@@ -19,28 +19,16 @@ function serializeProfile(profile: {
   reliabilityScore: unknown;
   serviceRadiusKm: unknown;
 }) {
-  return {
-    userId: profile.userId,
-    category: profile.category ?? null,
-    isOnline: profile.isOnline,
-    isAvailable: profile.isAvailable,
-    rating: decimalToNumber(profile.rating),
-    completedJobs: profile.completedJobs,
-    cancellationRate: decimalToNumber(profile.cancellationRate),
-    reliabilityScore: decimalToNumber(profile.reliabilityScore),
-    serviceRadiusKm: decimalToNumber(profile.serviceRadiusKm),
-  };
+  return { userId: profile.userId, category: profile.category ?? null, isOnline: profile.isOnline, isAvailable: profile.isAvailable, rating: decimalToNumber(profile.rating), completedJobs: profile.completedJobs, cancellationRate: decimalToNumber(profile.cancellationRate), reliabilityScore: decimalToNumber(profile.reliabilityScore), serviceRadiusKm: decimalToNumber(profile.serviceRadiusKm) };
 }
 
 export async function providerRoutes(app: FastifyInstance) {
   app.get("/v1/providers/me", { preHandler: requireRole("DRIVER", "SERVICE_PROVIDER") }, async (request, reply) => {
-    const role = request.user!.role;
-    if (role === "SERVICE_PROVIDER") {
+    if (request.user!.role === "SERVICE_PROVIDER") {
       const profile = await prisma.serviceProvider.findUnique({ where: { userId: request.user!.id } });
       if (!profile) return reply.code(404).send({ error: "PROVIDER_PROFILE_NOT_FOUND" });
       return { provider: serializeProfile(profile) };
     }
-
     const profile = await prisma.driverProfile.findUnique({ where: { userId: request.user!.id } });
     if (!profile) return reply.code(404).send({ error: "PROVIDER_PROFILE_NOT_FOUND" });
     return { provider: serializeProfile(profile) };
@@ -49,11 +37,9 @@ export async function providerRoutes(app: FastifyInstance) {
   app.patch("/v1/providers/me", { preHandler: requireRole("DRIVER", "SERVICE_PROVIDER") }, async (request, reply) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
     const data: { isOnline?: boolean; isAvailable?: boolean; serviceRadiusKm?: number; category?: string } = {};
-
     if (body.isOnline !== undefined) {
       if (typeof body.isOnline !== "boolean") return reply.code(400).send({ error: "INVALID_IS_ONLINE" });
       data.isOnline = body.isOnline;
-      if (!body.isOnline) data.isAvailable = false;
     }
     if (body.isAvailable !== undefined) {
       if (typeof body.isAvailable !== "boolean") return reply.code(400).send({ error: "INVALID_IS_AVAILABLE" });
@@ -71,19 +57,16 @@ export async function providerRoutes(app: FastifyInstance) {
       if (!category || category.length > MAX_CATEGORY_LENGTH) return reply.code(400).send({ error: "INVALID_CATEGORY" });
       data.category = category;
     }
-
-    if (data.isAvailable === true && data.isOnline !== false) data.isOnline = true;
+    if (data.isOnline === false) data.isAvailable = false;
+    if (data.isAvailable === true && data.isOnline === undefined) data.isOnline = true;
 
     if (request.user!.role === "SERVICE_PROVIDER") {
-      const profile = await prisma.serviceProvider.updateMany({ where: { userId: request.user!.id }, data });
-      if (profile.count === 0) return reply.code(404).send({ error: "PROVIDER_PROFILE_NOT_FOUND" });
-      const updated = await prisma.serviceProvider.findUniqueOrThrow({ where: { userId: request.user!.id } });
-      return { provider: serializeProfile(updated) };
+      const result = await prisma.serviceProvider.updateMany({ where: { userId: request.user!.id }, data });
+      if (result.count === 0) return reply.code(404).send({ error: "PROVIDER_PROFILE_NOT_FOUND" });
+      return { provider: serializeProfile(await prisma.serviceProvider.findUniqueOrThrow({ where: { userId: request.user!.id } })) };
     }
-
-    const profile = await prisma.driverProfile.updateMany({ where: { userId: request.user!.id }, data: { isOnline: data.isOnline, isAvailable: data.isAvailable, serviceRadiusKm: data.serviceRadiusKm } });
-    if (profile.count === 0) return reply.code(404).send({ error: "PROVIDER_PROFILE_NOT_FOUND" });
-    const updated = await prisma.driverProfile.findUniqueOrThrow({ where: { userId: request.user!.id } });
-    return { provider: serializeProfile(updated) };
+    const result = await prisma.driverProfile.updateMany({ where: { userId: request.user!.id }, data: { isOnline: data.isOnline, isAvailable: data.isAvailable, serviceRadiusKm: data.serviceRadiusKm } });
+    if (result.count === 0) return reply.code(404).send({ error: "PROVIDER_PROFILE_NOT_FOUND" });
+    return { provider: serializeProfile(await prisma.driverProfile.findUniqueOrThrow({ where: { userId: request.user!.id } })) };
   });
 }
