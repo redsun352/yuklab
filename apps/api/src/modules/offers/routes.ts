@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { Prisma } from "@yuklab/database";
+import type { Prisma } from "@yuklab/database";
 import { prisma } from "../../lib/prisma";
 import { requireAuth, requireRole } from "../auth/guard";
 import { findMatches } from "../matching/engine";
@@ -108,7 +108,10 @@ export async function offerRoutes(app: FastifyInstance) {
       const accepted = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         // Serialize claims for the same provider. Provider availability is a single
         // operational slot, so a driver/service provider cannot run two active orders.
-        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`yuklab:provider:${selectedBeforeClaim.providerId}`}, 0))`);
+        await tx.$executeRawUnsafe(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          `yuklab:provider:${selectedBeforeClaim.providerId}`,
+        );
 
         // Re-check provider eligibility inside the same transaction that claims the order.
         // This closes the stale-precheck window where a provider can go offline after matching.
@@ -135,7 +138,10 @@ export async function offerRoutes(app: FastifyInstance) {
         if (match.vehicleId) {
           // Vehicle claims are separately serialized so two offers cannot bind the
           // same physical vehicle even when they target different providers.
-          await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`yuklab:vehicle:${match.vehicleId}`}, 0))`);
+          await tx.$executeRawUnsafe(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            `yuklab:vehicle:${match.vehicleId}`,
+          );
 
           const vehicle = await tx.vehicle.findFirst({
             where: { id: match.vehicleId, ownerId: selectedBeforeClaim.providerId, active: true },
