@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "./server";
 import { prisma } from "./lib/prisma";
+import { setDriverLocation } from "./modules/tracking/state";
 
 const app = buildApp();
 const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -56,6 +57,15 @@ describe("critical customer-provider order flow", () => {
         reliabilityScore: 100,
       },
     });
+    await setDriverLocation({
+      driverId: providerId,
+      lat: 38.7000,
+      lng: 35.5400,
+      heading: 90,
+      speedKph: 0,
+      accuracyM: 5,
+      timestamp: new Date().toISOString(),
+    });
   });
 
   afterAll(async () => {
@@ -92,6 +102,14 @@ describe("critical customer-provider order flow", () => {
     expect(createOrder.statusCode).toBe(201);
     orderId = JSON.parse(createOrder.body).order.id;
     expect(JSON.parse(createOrder.body).order.status).toBe("PUBLISHED");
+
+    const matches = await app.inject({
+      method: "GET",
+      url: `/v1/orders/${orderId}/matches`,
+      headers: auth(customer!.accessToken),
+    });
+    expect(matches.statusCode).toBe(200);
+    expect(JSON.parse(matches.body).matches.some((match: { providerId: string }) => match.providerId === providerId)).toBe(true);
 
     const createOffer = await app.inject({
       method: "POST",
