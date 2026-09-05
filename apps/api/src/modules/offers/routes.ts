@@ -74,7 +74,7 @@ export async function offerRoutes(app: FastifyInstance) {
   app.get<{ Params: { orderId: string } }>("/v1/orders/:orderId/offers", { preHandler: requireAuth }, async (req, reply) => {
     const order = await prisma.order.findFirst({ where: { id: req.params.orderId, customerId: req.user!.id } });
     if (!order) return reply.code(404).send({ error: "ORDER_NOT_FOUND" });
-    const offers = await prisma.offer.findMany({ where: { orderId: order.id }, orderBy: [{ status: "asc" }, { amountMinor: "asc" }], include: { provider: { select: { id: true, firstName: true, lastName: true, role: true } } });
+    const offers = await prisma.offer.findMany({ where: { orderId: order.id }, orderBy: [{ status: "asc" }, { amountMinor: "asc" }], include: { provider: { select: { id: true, firstName: true, lastName: true, role: true } } } });
     return { offers: serializeBigInt(offers) };
   });
 
