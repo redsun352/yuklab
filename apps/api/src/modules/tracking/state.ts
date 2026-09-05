@@ -11,7 +11,9 @@ export type DriverLocation = {
 };
 
 const locations = new Map<string, DriverLocation>();
+const lastPersistedAt = new Map<string, number>();
 const ttlSeconds = Number(process.env.TRACKING_LOCATION_TTL_SECONDS ?? 120);
+const persistIntervalSeconds = Number(process.env.TRACKING_LOCATION_PERSIST_INTERVAL_SECONDS ?? 30);
 const redisUrl = process.env.REDIS_URL;
 const redis = redisUrl ? new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 }) : null;
 const geoKey = "yuklab:tracking:drivers:geo";
@@ -39,10 +41,10 @@ async function ensureRedis(): Promise<boolean> {
   }
 }
 
-export async function setDriverLocation(location: DriverLocation): Promise<void> {
-  if (!isFresh(location)) return;
+export async function setDriverLocation(location: DriverLocation): Promise<boolean> {
+  if (!isFresh(location)) return false;
   locations.set(location.driverId, location);
-  if (!(await ensureRedis())) return;
+  if (!(await ensureRedis())) return false;
   try {
     const timestampMs = Date.parse(location.timestamp);
     await redis!.multi()
@@ -50,9 +52,18 @@ export async function setDriverLocation(location: DriverLocation): Promise<void>
       .geoadd(geoKey, location.lng, location.lat, location.driverId)
       .zadd(seenKey, timestampMs, location.driverId)
       .exec();
+
+    const now = Date.now();
+    const intervalMs = Math.max(5, Number.isFinite(persistIntervalSeconds) ? persistIntervalSeconds : 30) * 1000;
+    const last = lastPersistedAt.get(location.driverId) ?? 0;
+    if (now - last >= intervalMs) {
+      lastPersistedAt.set(location.driverId, now);
+      return true;
+    }
   } catch {
     // Memory remains the local fallback when Redis is temporarily unavailable.
   }
+  return false;
 }
 
 export async function getDriverLocation(driverId: string): Promise<DriverLocation | undefined> {
