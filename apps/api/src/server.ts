@@ -8,6 +8,7 @@ import { orderRoutes } from "./modules/orders/routes";
 import { orderTransitionRoutes } from "./modules/orders/transition-routes";
 import { providerOrderRoutes } from "./modules/orders/provider-routes";
 import { offerRoutes } from "./modules/offers/routes";
+import { expireOffers } from "./modules/offers/expiry";
 import { matchingRoutes } from "./modules/matching/routes";
 import { trackingRoutes } from "./modules/tracking/routes";
 import { trackingRealtimeRoutes } from "./modules/tracking/realtime";
@@ -77,8 +78,14 @@ if (process.env.NODE_ENV !== "test") {
   const app = buildApp();
   const port = Number(process.env.PORT ?? 3001);
   const host = process.env.HOST ?? "0.0.0.0";
+  const expiryInterval = setInterval(() => {
+    void expireOffers(prisma).catch((error) => app.log.error(error, "offer expiry maintenance failed"));
+  }, 30_000);
+  expiryInterval.unref();
+
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, "shutting down");
+    clearInterval(expiryInterval);
     try {
       await app.close();
       await prisma.$disconnect();
