@@ -36,6 +36,7 @@ describe("critical customer-provider order flow", () => {
   let customer: { accessToken: string; user: { id: string } } | undefined;
   let provider: { accessToken: string; user: { id: string } } | undefined;
   let orderId: string | undefined;
+  const contentionOrderIds: string[] = [];
   let vehicleId: string | undefined;
 
   beforeAll(async () => {
@@ -83,7 +84,8 @@ describe("critical customer-provider order flow", () => {
   });
 
   afterAll(async () => {
-    if (orderId) await prisma.order.deleteMany({ where: { id: orderId } });
+    const orderIds = [orderId, ...contentionOrderIds].filter((id): id is string => Boolean(id));
+    if (orderIds.length > 0) await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
     const userIds = [customerId, providerId].filter((id): id is string => Boolean(id));
     if (userIds.length > 0) {
       await prisma.serviceProvider.deleteMany({ where: { userId: { in: userIds } } });
@@ -229,5 +231,87 @@ describe("critical customer-provider order flow", () => {
     });
     expect(inactiveTracking.statusCode).toBe(409);
     expect(JSON.parse(inactiveTracking.body).error).toBe("TRACKING_NOT_ACTIVE");
+  });
+
+  it("prevents concurrent orders from claiming the same provider and vehicle", async () => {
+    expect(customer).toBeDefined();
+    expect(provider).toBeDefined();
+    expect(vehicleId).toBeDefined();
+
+    const createOrder = async (label: string) => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/orders",
+        headers: auth(customer!.accessToken),
+        payload: {
+          serviceType: "Yük Taşımacılığı",
+          pickupAddress: `Kayseri ${label}`,
+          deliveryAddress: "Kayseri OSB",
+          pickupLat: 38.6908,
+          pickupLng: 35.5538,
+          deliveryLat: 38.7569,
+          deliveryLng: 35.4047,
+          budgetMinor: "250000",
+          currency: "TRY",
+        },
+      });
+      expect(response.statusCode).toBe(201);
+      const id = JSON.parse(response.body).order.id as string;
+      contentionOrderIds.push(id);
+      return id;
+    };
+
+    const [firstOrderId, secondOrderId] = await Promise.all([
+      createOrder("Talas-1"),
+      createOrder("Talas-2"),
+    ]);
+
+    const createOffer = async (targetOrderId: string, amountMinor: string) => {
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/orders/${targetOrderId}/offers`,
+        headers: auth(provider!.accessToken),
+        payload: { amountMinor, currency: "TRY", etaMinutes: 30 },
+      });
+      expect(response.statusCode).toBe(201);
+      return JSON.parse(response.body).offer.id as string;
+    };
+
+    const [firstOfferId, secondOfferId] = await Promise.all([
+      createOffer(firstOrderId, "210000"),
+      createOffer(secondOrderId, "215000"),
+    ]);
+
+    const results = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: `/v1/orders/${firstOrderId}/offers/${firstOfferId}/accept`,
+        headers: auth(customer!.accessToken),
+      }),
+      app.inject({
+        method: "POST",
+        url: `/v1/orders/${secondOrderId}/offers/${secondOfferId}/accept`,
+        headers: auth(customer!.accessToken),
+      }),
+    ]);
+
+    const successCount = results.filter((result) => result.statusCode === 200).length;
+    const conflictCount = results.filter((result) => result.statusCode === 409).length;
+    expect(successCount).toBe(1);
+    expect(conflictCount).toBe(1);
+
+    const activeOrders = await prisma.order.findMany({
+      where: {
+        assignedDriverId: providerId,
+        status: { in: ["DRIVER_ASSIGNED", "EN_ROUTE_PICKUP", "ARRIVED_PICKUP", "LOADED", "IN_TRANSIT", "ARRIVED_DELIVERY", "DELIVERED"] },
+      },
+      select: { id: true, vehicleId: true },
+    });
+    expect(activeOrders).toHaveLength(1);
+    expect(activeOrders[0]?.vehicleId).toBe(vehicleId);
+
+    const losingOrderId = results[0].statusCode === 200 ? secondOrderId : firstOrderId;
+    const losingOrder = await prisma.order.findUnique({ where: { id: losingOrderId }, select: { status: true, assignedDriverId: true, vehicleId: true } });
+    expect(losingOrder).toEqual({ status: "OFFERING", assignedDriverId: null, vehicleId: null });
   });
 });
