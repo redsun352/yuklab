@@ -42,6 +42,7 @@ export async function transitionOrder(accessToken: string, orderId: string, stat
 export async function listProviderOrders(accessToken: string) { return request<{ orders: Order[] }>("/v1/provider/orders", auth(accessToken)); }
 export async function listProviderOffers(accessToken: string) { return request<{ offers: Offer[] }>("/v1/provider/offers", auth(accessToken)); }
 export async function createOffer(accessToken: string, orderId: string, input: { amountMinor: number; etaMinutes?: number; note?: string }) { return request<{ offer: Offer }>(`/v1/orders/${orderId}/offers`, { ...auth(accessToken), method: "POST", body: JSON.stringify(input) }); }
+export async function withdrawOffer(accessToken: string, offerId: string) { return request<{ offer: Offer; order: { id: string; status: string } }>(`/v1/provider/offers/${offerId}/withdraw`, { ...auth(accessToken), method: "POST" }); }
 export async function listVehicles(accessToken: string) { return request<{ vehicles: Vehicle[] }>("/v1/vehicles", auth(accessToken)); }
 export async function createVehicle(accessToken: string, input: { type: string; subtype?: string; plateNumber?: string; capacityKg?: number; volumeM3?: number; refrigerated?: boolean }) { return request<{ vehicle: Vehicle }>("/v1/vehicles", { ...auth(accessToken), method: "POST", body: JSON.stringify(input) }); }
 export async function updateVehicle(accessToken: string, id: string, input: { type: string; subtype?: string; plateNumber?: string; capacityKg?: number; volumeM3?: number; refrigerated?: boolean; active?: boolean }) { return request<{ vehicle: Vehicle }>(`/v1/vehicles/${id}`, { ...auth(accessToken), method: "PATCH", body: JSON.stringify(input) }); }
@@ -50,7 +51,4 @@ export async function sendTrackingLocation(accessToken: string, input: { lat: nu
 export async function getOrderTracking(accessToken: string, orderId: string) { return request<TrackingData>(`/v1/tracking/orders/${orderId}/location`, auth(accessToken)); }
 export async function getTrackingWsToken(accessToken: string, orderId: string) { return request<{ token: string; expiresInSeconds: number }>(`/v1/tracking/orders/${orderId}/ws-token`, { ...auth(accessToken), method: "POST" }); }
 export function trackingWebSocketUrl(orderId: string): string { const base = API_BASE_URL.replace(/^http/i, "ws").replace(/\/$/, ""); return `${base}/v1/tracking/orders/${encodeURIComponent(orderId)}/ws`; }
-export async function getRoute(accessToken: string, from: RoutePoint, to: RoutePoint) {
-  const params = new URLSearchParams({ fromLat: String(from.lat), fromLng: String(from.lng), toLat: String(to.lat), toLng: String(to.lng) });
-  return request<RouteResult>(`/v1/routing/route?${params.toString()}`, auth(accessToken));
-}
+export async function getRoute(accessToken: string, from: RoutePoint, to: RoutePoint) { const params = new URLSearchParams({ fromLat: String(from.lat), fromLng: String(from.lng), toLat: String(to.lat), toLng: String(to.lng) }); return request<RouteResult>(`/v1/routing/route?${params.toString()}`, auth(accessToken)); }
