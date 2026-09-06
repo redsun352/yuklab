@@ -30,7 +30,7 @@ export async function trackingRoutes(app: FastifyInstance) {
     const shouldPersist = await setDriverLocation(location);
     if (orderId) {
       publishOrderLocation(orderId, location);
-      if (shouldPersist) await prisma.trackingEvent.create({ data: { orderId, actorId: request.user!.id, eventType: "DRIVER_LOCATION", lat, lng, metadata: { heading, speedKph, accuracyM, timestamp: time.toISOString() } });
+      if (shouldPersist) await prisma.trackingEvent.create({ data: { orderId, actorId: request.user!.id, eventType: "DRIVER_LOCATION", lat, lng, metadata: { heading, speedKph, accuracyM, timestamp: time.toISOString() } } });
     }
     return reply.code(204).send();
   });
